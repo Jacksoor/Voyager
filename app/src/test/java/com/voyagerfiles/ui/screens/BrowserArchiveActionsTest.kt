@@ -27,12 +27,24 @@ class BrowserArchiveActionsTest {
     }
 
     @Test
+    fun doesNotOfferToZipASingleArchive() {
+        listOf("bundle.zip", "bundle.tar.gz", "legacy.rar", "photos.7z", "log.gz").forEach { name ->
+            assertTrue(
+                name,
+                BrowserArchiveAction.COMPRESS_TO_ZIP !in
+                    BrowserArchiveActions.forSelection(listOf(file(name))),
+            )
+        }
+        assertTrue(
+            BrowserArchiveAction.COMPRESS_TO_ZIP in
+                BrowserArchiveActions.forSelection(listOf(file("bundle.zip", isDirectory = true))),
+        )
+    }
+
+    @Test
     fun offersExtractionOnlyForOneSupportedArchive() {
         assertEquals(
-            setOf(
-                BrowserArchiveAction.COMPRESS_TO_ZIP,
-                BrowserArchiveAction.EXTRACT_HERE,
-            ),
+            setOf(BrowserArchiveAction.EXTRACT_HERE),
             BrowserArchiveActions.forSelection(listOf(file("bundle.tar.gz"))),
         )
         assertEquals(
@@ -46,10 +58,7 @@ class BrowserArchiveActionsTest {
         val selection = listOf(file("legacy.rar"))
 
         assertEquals(
-            setOf(
-                BrowserArchiveAction.COMPRESS_TO_ZIP,
-                BrowserArchiveAction.EXTRACTION_UNSUPPORTED,
-            ),
+            setOf(BrowserArchiveAction.EXTRACTION_UNSUPPORTED),
             BrowserArchiveActions.forSelection(selection),
         )
         assertEquals(

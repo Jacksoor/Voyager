@@ -30,11 +30,17 @@ object BrowserArchiveActions {
 
     fun forSelection(items: List<FileItem>): Set<BrowserArchiveAction> = buildSet {
         if (items.isEmpty()) return@buildSet
-        add(BrowserArchiveAction.COMPRESS_TO_ZIP)
-        if (items.size != 1) return@buildSet
+        if (items.size != 1) {
+            add(BrowserArchiveAction.COMPRESS_TO_ZIP)
+            return@buildSet
+        }
 
         val item = items.single()
         val format = ArchiveFormat.detect(item.name)
+        // Zipping a single archive only wraps it again; several files may still include archives.
+        if (item.isDirectory || (format == null && !item.isArchive)) {
+            add(BrowserArchiveAction.COMPRESS_TO_ZIP)
+        }
         when {
             format?.canExtract == true -> add(BrowserArchiveAction.EXTRACT_HERE)
             format == ArchiveFormat.RAR_UNSUPPORTED || item.isArchive -> {

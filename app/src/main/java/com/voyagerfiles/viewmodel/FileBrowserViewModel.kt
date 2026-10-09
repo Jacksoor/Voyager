@@ -668,8 +668,16 @@ class FileBrowserViewModel @JvmOverloads constructor(
     }
 
     fun deleteSelected(mode: DeleteMode? = null) {
+        deletePaths(_browseState.value.selectedFiles.toList(), mode, clearSelectionAfter = true)
+    }
+
+    fun deletePaths(
+        paths: List<String>,
+        mode: DeleteMode? = null,
+        clearSelectionAfter: Boolean = false,
+    ) {
         val state = _browseState.value
-        val selectedPaths = state.selectedFiles.toList()
+        val selectedPaths = paths.toList()
         if (selectedPaths.isEmpty()) return
         val resolvedMode = mode ?: if (state.source == FileSource.LOCAL && useTrash.value) {
             DeleteMode.TRASH
@@ -697,7 +705,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
                     if (firstError == null) firstError = error
                 }
             }
-            clearSelection()
+            if (clearSelectionAfter) clearSelection()
             refreshFiles()
             if (failed > 0) {
                 showSnackbar(
@@ -738,6 +746,14 @@ class FileBrowserViewModel @JvmOverloads constructor(
     }
 
     fun createZipFromSelection(archiveName: String) {
+        createZip(_browseState.value.selectedFiles.toList(), archiveName, clearSelectionAfter = true)
+    }
+
+    fun createZip(
+        paths: List<String>,
+        archiveName: String,
+        clearSelectionAfter: Boolean = false,
+    ) {
         val validatedName = validFileNameOrNotify(archiveName) ?: return
         if ('\\' in validatedName) {
             showSnackbar(UiText.Resource(R.string.name_no_backslashes))
@@ -748,7 +764,8 @@ class FileBrowserViewModel @JvmOverloads constructor(
             return
         }
         val state = _browseState.value
-        val selectedItems = state.files.filter { it.path in state.selectedFiles }
+        val targetPaths = paths.toSet()
+        val selectedItems = state.files.filter { it.path in targetPaths }
         if (selectedItems.isEmpty()) return
         val provider = fileProvider
         val destinationDirectory = state.currentPath
@@ -767,7 +784,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
                 onProgress = publishProgress,
             ).fold(
                 onSuccess = { archive ->
-                    clearSelection()
+                    if (clearSelectionAfter) clearSelection()
                     refreshFiles()
                     showSnackbar(
                         UiText.Resource(R.string.archive_created, listOf(UiText.Dynamic(archive.name))),
