@@ -47,6 +47,13 @@ data class BrowserSession(
     val canPin: Boolean
         get() = source != FileSource.ROOT
 
+    /**
+     * Servers and Shizuku have one tab each, so pinning one pins the whole place, from its root: the
+     * tab keeps reaching every folder, and no folder above the pin has to open in another tab.
+     */
+    val pinsWholePlace: Boolean
+        get() = connectionId != null || source == FileSource.SHIZUKU
+
     /** The start tab opens on launch without asking: Shizuku may need its permission first. */
     val canBeStartTab: Boolean
         get() = pinned && source != FileSource.SHIZUKU

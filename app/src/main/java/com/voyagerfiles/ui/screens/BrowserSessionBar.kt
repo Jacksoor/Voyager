@@ -49,6 +49,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,12 +110,13 @@ internal object SessionBarModel {
         sessions.count { it.pinned } < cells
 
     /**
-     * Where to go when the shown session [disconnectedId] is disconnected: the most recently used
-     * other session that can show its files without connecting again, or null for Home.
+     * The tab to show when the shown one is closed or disconnected ([leaving]): the most recently
+     * used other tab that can show its files without connecting again, or null for Home. A tab
+     * waiting for its connection (a restored server or Shizuku pin) is never opened as a side effect.
      */
-    fun sessionAfterDisconnect(sessions: List<BrowserSession>, disconnectedId: String): BrowserSession? =
+    fun nextSessionToShow(sessions: List<BrowserSession>, leaving: Set<String>): BrowserSession? =
         sessions
-            .filter { it.id != disconnectedId && (!it.hasConnection || it.connected) }
+            .filter { it.id !in leaving && (!it.hasConnection || it.connected) }
             .maxByOrNull { it.lastUsed }
 
     /**
@@ -212,9 +214,13 @@ internal fun BrowserSessionBar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             val cell = Modifier.weight(1f).fillMaxHeight()
-            slots.take(half).forEach { SessionBarCell(it, cell, activeSessionId, canPinMore, onSelect, onClose, onSetPinned, onDisconnect, onReset, onSetStartTab = onSetStartTab) }
-            SessionsButton(count = sessions.size, onClick = onOpenSessions, modifier = cell)
-            slots.drop(half).forEach { SessionBarCell(it, cell, activeSessionId, canPinMore, onSelect, onClose, onSetPinned, onDisconnect, onReset, onSetStartTab = onSetStartTab) }
+            // Keyed by session: a tab's menu (still fading out after Pin moved the tab) stays with it.
+            slots.forEachIndexed { index, slot ->
+                if (index == half) SessionsButton(count = sessions.size, onClick = onOpenSessions, modifier = cell)
+                key((slot as? SessionBarSlot.Session)?.session?.id ?: "empty:$index") {
+                    SessionBarCell(slot, cell, activeSessionId, canPinMore, onSelect, onClose, onSetPinned, onDisconnect, onReset, onSetStartTab = onSetStartTab)
+                }
+            }
         }
     }
 }
@@ -271,12 +277,14 @@ internal fun BrowserSessionRail(
                 verticalArrangement = Arrangement.Bottom,
             ) {
                 shown.asReversed().forEach { session ->
+                  key(session.id) {
                     SessionBarCell(
                         SessionBarSlot.Session(session), cell, activeSessionId, canPinMore,
                         onSelect, onClose, onSetPinned, onDisconnect, onReset, labelLines = 2,
                         onSetStartTab = onSetStartTab,
                         menuBeside = true,
                     )
+                  }
                 }
                 Spacer(Modifier.height(RAIL_GAP))
                 SessionsButton(count = sessions.size, onClick = onOpenSessions, modifier = cell)

@@ -290,6 +290,8 @@ class FileBrowserViewModel @JvmOverloads constructor(
         when {
             active.source == FileSource.LOCAL -> openLocalFolder(normalizedPath)
             active.connectionId != null -> openRemoteFolder(active.connectionId, normalizedPath)
+            // Pins of one-tab places start at their root, so this is not expected; say so rather than do nothing.
+            else -> showSnackbar(UiText.Resource(R.string.location_outside_session))
         }
     }
 
@@ -1428,7 +1430,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
         val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return
         if (pinned && !session.canPin) return
         if (pinned && !session.pinned &&
-            !SessionBarModel.canPinMore(_sessions.value, pinCapacity)
+            !SessionBarModel.canPinMore(_sessions.value, _pinCapacity.value)
         ) return
         if (pinned == session.pinned) return
         updateSession(sessionId) { current ->
@@ -1437,8 +1439,8 @@ class FileBrowserViewModel @JvmOverloads constructor(
                 pinOrder = if (pinned) ++pinCounter else 0L,
                 startPath = when {
                     !pinned || current.source == FileSource.SAF -> current.startPath
-                    // A server is pinned as a whole: its one tab keeps reaching every folder.
-                    current.connectionId != null -> current.rootPath
+                    // A server or Shizuku is pinned as a whole: its one tab keeps reaching every folder.
+                    current.pinsWholePlace -> current.rootPath
                     else -> current.currentPath
                 },
                 // Only a pin can be the start tab.
@@ -1464,10 +1466,12 @@ class FileBrowserViewModel @JvmOverloads constructor(
     }
 
     /** How many tabs the current layout can pin: the bar's four, or what fits in the rail. */
-    private var pinCapacity = SessionBarModel.SIDE_CELLS
+    private val _pinCapacity = MutableStateFlow(SessionBarModel.SIDE_CELLS)
+    /** Shared with Home, so its menu allows the same pins as the bar or rail. */
+    val pinCapacity: StateFlow<Int> = _pinCapacity.asStateFlow()
 
     fun setPinCapacity(cells: Int) {
-        pinCapacity = cells.coerceAtLeast(1)
+        _pinCapacity.value = cells.coerceAtLeast(1)
     }
 
     /** Hands out [BrowserSession.pinOrder]; restored pins take theirs first, in their saved order. */
@@ -1482,7 +1486,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
             session.source == FileSource.SAF ->
                 session.treeUri?.let { PinnedSession.Saf(it, session.startPath, session.currentPath, start) }
             session.source == FileSource.SHIZUKU -> PinnedSession.Shizuku(session.startPath, session.currentPath, start)
-            connectionId != null -> PinnedSession.Remote(connectionId, session.startPath, session.currentPath, start)
+            connectionId != null -> PinnedSession.Remote(connectionId, session.startPath, session.currentPath, start, session.originLabel)
             else -> null
         }
     }
@@ -1520,14 +1524,14 @@ class FileBrowserViewModel @JvmOverloads constructor(
                     when (pin) {
                         is PinnedSession.Local -> addLocalSession(pin.startPath, pin.currentPath, pinned = true)
                         is PinnedSession.Remote -> connections.firstOrNull { it.id == pin.connectionId }?.let { connection ->
-                            addRemoteSession(connection, SERVER_ROOT, pin.currentPath, pinned = true)
+                            addRemoteSession(connection, PLACE_ROOT, pin.currentPath, pinned = true)
                         }
                         is PinnedSession.Saf -> if (pin.treeUri in grantedTrees) {
                             addSafSession(Uri.parse(pin.treeUri), pinned = true)
                         } else {
                             null
                         }
-                        is PinnedSession.Shizuku -> addShizukuSession(pin.startPath, pin.currentPath, pinned = true)
+                        is PinnedSession.Shizuku -> addShizukuSession(PLACE_ROOT, pin.currentPath, pinned = true)
                     }
                 }.getOrNull()
                 if (!pin.isStart) continue
@@ -1536,6 +1540,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
                 } else {
                     missingStartTab = when (pin) {
                         is PinnedSession.Saf -> SafFileProvider.titleForTreeUri(Uri.parse(pin.treeUri))
+                        is PinnedSession.Remote -> pin.name.ifEmpty { pin.startPath.trimEnd('/').substringAfterLast('/').ifEmpty { pin.startPath } }
                         else -> pin.startPath.trimEnd('/').substringAfterLast('/').ifEmpty { pin.startPath }
                     }
                 }
@@ -1546,8 +1551,9 @@ class FileBrowserViewModel @JvmOverloads constructor(
     }
 
     /**
-     * What launching should do with the start tab. Device and folder-picker tabs open at once;
-     * a server tab connects first ([openServerStartTab]) while Home stays usable.
+     * What launching should do with the start tab. Device and folder-picker tabs open here; a
+     * server tab ([StartTabPlan.Server]) opens in the browser, which shows it connecting and any
+     * error with Retry.
      */
     suspend fun startTabPlan(hasAllFilesAccess: Boolean): StartTabPlan {
         pinsRestored.first { it }
@@ -1562,16 +1568,6 @@ class FileBrowserViewModel @JvmOverloads constructor(
                 StartTabPlan.Opened
             }
         }
-    }
-
-    /**
-     * Connects the server start tab and lists its folder. Returns null on success, else why it
-     * failed. Cancelling the caller (the user tapped Cancel or left Home) stops the attempt.
-     */
-    suspend fun openServerStartTab(sessionId: String): UiText? {
-        cancelInitialNavigation()
-        if (!activateSessionInternal(sessionId)) return UiText.Resource(R.string.launch_tab_gone)
-        return _browseState.value.error
     }
 
     fun disconnectRemote() {
@@ -1599,15 +1595,17 @@ class FileBrowserViewModel @JvmOverloads constructor(
         }
     }
 
-    private fun refreshConnectionState(sessionId: String) {
-        val connected = sessionProviders[sessionId]?.hasOpenConnection == true
+    /** Shizuku's check is IPC (binder pings), so it runs off the main thread. */
+    private suspend fun refreshConnectionState(sessionId: String) {
+        val provider = sessionProviders[sessionId]
+        val connected = provider != null && withContext(Dispatchers.IO) { provider.hasOpenConnection }
         if (_sessions.value.firstOrNull { it.id == sessionId }?.connected == connected) return
         updateSession(sessionId) { it.copy(connected = connected) }
     }
 
     /** Re-reads every session's connection state, e.g. after the app was in the background. */
     fun refreshConnectionStates() {
-        _sessions.value.forEach { refreshConnectionState(it.id) }
+        viewModelScope.launch { _sessions.value.forEach { refreshConnectionState(it.id) } }
     }
 
     fun remoteImageThumbnailLoader(sessionId: String?): RemoteImageThumbnailLoader? =
@@ -1633,6 +1631,13 @@ class FileBrowserViewModel @JvmOverloads constructor(
             }
             if (session.pinned) savePins()
         }
+    }
+
+    /** Moves a tab back to its start folder without showing it; the caller opens it. */
+    fun rewindSession(sessionId: String) {
+        val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return
+        updateSession(sessionId) { it.copy(currentPath = it.startPath) }
+        if (session.pinned) savePins()
     }
 
     fun closeActiveSession() {
@@ -2013,11 +2018,10 @@ class FileBrowserViewModel @JvmOverloads constructor(
             return
         }
 
-        val nextSession = remainingSessions.maxByOrNull { it.lastUsed }
-        if (nextSession != null) {
-            activateSessionInternal(nextSession.id)
-            return
-        }
+        val nextSession = nextSessionToShow(remainingSessions)
+        if (nextSession != null && activateSessionInternal(nextSession.id)) return
+
+        loadGuard.nextRequest(null)
 
         fileProvider = FileProviderFactory.createLocal()
         browserSessionRootPath = null
@@ -2037,6 +2041,10 @@ class FileBrowserViewModel @JvmOverloads constructor(
         }
     }
 
+    /** A tab that shows its files right away; pins still waiting for a connection are left alone. */
+    private fun nextSessionToShow(remaining: List<BrowserSession>): BrowserSession? =
+        SessionBarModel.nextSessionToShow(remaining.filter { it.id in sessionProviders }, emptySet())
+
     private fun closeSessionsAfterInactivity(sessionIds: Set<String>) {
         val closedSessions = _sessions.value.filter { it.id in sessionIds }
         if (closedSessions.isEmpty()) return
@@ -2053,7 +2061,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
         _snackbarMessage.value = null
 
         if (activeSessionWasClosed) {
-            val nextSession = remainingSessions.maxByOrNull { it.lastUsed }
+            val nextSession = nextSessionToShow(remainingSessions)
             if (nextSession == null) {
                 loadGuard.nextRequest(null)
                 fileProvider = FileProviderFactory.createLocal()
@@ -2151,5 +2159,5 @@ enum class ClipboardOperation {
 private const val SHIZUKU_SESSION_ID = "shizuku:/"
 private const val SHIZUKU_START_PATH = "/storage/emulated/0/Android"
 
-/** Server tabs are rooted and pinned at the server's root. */
-private const val SERVER_ROOT = "/"
+/** Server and Shizuku tabs are rooted and pinned at "/". */
+private const val PLACE_ROOT = "/"

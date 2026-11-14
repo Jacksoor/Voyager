@@ -385,7 +385,7 @@ fun BrowserScreen(
     fun disconnectSession(sessionId: String) {
         viewModel.disconnectSession(sessionId)
         if (sessionId != activeSession?.id) return
-        val next = SessionBarModel.sessionAfterDisconnect(sessions, sessionId)
+        val next = SessionBarModel.nextSessionToShow(sessions, setOf(sessionId))
         if (next != null) {
             viewModel.activateSession(next.id)
         } else {
@@ -395,9 +395,11 @@ fun BrowserScreen(
     }
 
     fun closeSession(sessionId: String) {
-        val closesOnlyActiveSession = sessionId == activeSession?.id && sessions.size <= 1
+        // Closing the shown tab with no other tab ready to show (only pins waiting to connect) goes Home.
+        val leavesBrowser = sessionId == activeSession?.id &&
+            SessionBarModel.nextSessionToShow(sessions, setOf(sessionId)) == null
         viewModel.closeSession(sessionId)
-        if (closesOnlyActiveSession) {
+        if (leavesBrowser) {
             showSessionsSheet = false
             onNavigateBack()
         }

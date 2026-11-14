@@ -152,7 +152,7 @@ private fun AppNavigationContent(
     LaunchedEffect(sessionClosureGeneration) {
         if (
             sessionClosureGeneration > 0L &&
-            viewModel.sessions.value.isEmpty() &&
+            viewModel.activeSession.value == null &&
             navController.currentDestination?.route in setOf(Screen.Browser.route, Screen.Duplicates.route)
         ) {
             navController.navigateHome()
