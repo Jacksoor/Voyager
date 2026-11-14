@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -41,12 +42,14 @@ import com.voyagerfiles.audio.AudioToneInstaller
 import com.voyagerfiles.data.model.LocalFileVisibility
 import com.voyagerfiles.data.model.FileItem
 import com.voyagerfiles.data.model.FileSource
+import com.voyagerfiles.data.model.isNetwork
 import com.voyagerfiles.ui.components.AudioToneMenuItems
 import com.voyagerfiles.ui.text.asString
 import com.voyagerfiles.util.ShareIntentPlan
 
 /** Actions offered by a list row's own menu, in the order they are shown. */
 enum class FileRowAction {
+    OPEN_IN_NEW_SESSION,
     OPEN_WITH,
     SHARE,
     DOWNLOAD,
@@ -102,6 +105,10 @@ data class FileRowMenuModel(val actions: List<FileRowAction>) {
                     add(if (file.name.startsWith('.')) FileRowAction.UNHIDE else FileRowAction.HIDE)
                 }
                 if (file.isDirectory && file.source == FileSource.LOCAL) add(FileRowAction.FOLDER_SHORTCUTS)
+                // Device and server folders can open as another tab; SAF, root and Shizuku have one tab each.
+                if (file.isDirectory && (file.source == FileSource.LOCAL || file.source.isNetwork)) {
+                    add(FileRowAction.OPEN_IN_NEW_SESSION)
+                }
                 if (AudioToneInstaller.isSupported(file)) add(FileRowAction.AUDIO_TONES)
             }
             return FileRowMenuModel(FileRowAction.entries.filter { it in available })
@@ -210,6 +217,8 @@ internal fun BrowserFileRowMenu(
                     }
                     FileRowAction.DETAILS ->
                         RowMenuItem(R.string.details_title, Icons.Filled.Info) { choose(action) }
+                    FileRowAction.OPEN_IN_NEW_SESSION ->
+                        RowMenuItem(R.string.action_open_in_new_session, Icons.Filled.Tab) { choose(action) }
                     FileRowAction.DELETE ->
                         RowMenuItem(R.string.action_delete, Icons.Filled.Delete) { choose(action) }
                 }

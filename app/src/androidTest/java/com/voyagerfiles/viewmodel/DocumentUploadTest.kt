@@ -45,7 +45,7 @@ class DocumentUploadTest {
         )
         val viewModel = FileBrowserViewModel(application)
         composeTestRule.setContent {}
-        composeTestRule.runOnIdle { viewModel.openLocalRoot(destination.absolutePath) }
+        composeTestRule.runOnIdle { viewModel.openLocalFolder(destination.absolutePath) }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.browseState.value.currentPath == destination.absolutePath &&
                 !viewModel.browseState.value.isLoading
@@ -72,7 +72,7 @@ class DocumentUploadTest {
         val authority = "${application.packageName}.fileprovider"
         val viewModel = FileBrowserViewModel(application)
         composeTestRule.setContent {}
-        composeTestRule.runOnIdle { viewModel.openLocalRoot(destination.absolutePath) }
+        composeTestRule.runOnIdle { viewModel.openLocalFolder(destination.absolutePath) }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.browseState.value.currentPath == destination.absolutePath &&
                 !viewModel.browseState.value.isLoading

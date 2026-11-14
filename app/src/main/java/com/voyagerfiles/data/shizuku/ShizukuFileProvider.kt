@@ -20,6 +20,8 @@ class ShizukuFileProvider(private val connection: ShizukuConnection) : RootFileP
     RootShell(startProcess = connection::start, requireRoot = false, accessName = "Shizuku", externalInputPipe = true, temporaryDirectory = "/data/local/tmp"),
     FileSource.SHIZUKU,
 ) {
+    override val hasOpenConnection: Boolean get() = connection.isOpen
+
     override fun statEntry(path: String): ByteArray = connection.files { it.stat(path) }
     override fun existsAt(path: String): Boolean = connection.files { it.exists(path) }
     override fun mkdirAt(path: String) { val pinned = primitivePath(path); connection.files { it.mkdir(pinned) } }

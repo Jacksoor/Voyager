@@ -29,6 +29,7 @@ import org.junit.Test
 
 class SessionAutoCloseNavigationTest {
 
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -80,13 +81,13 @@ class SessionAutoCloseNavigationTest {
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.autoCloseSessions.value
         }
-        composeTestRule.runOnIdle { viewModel.openLocalRoot(root.absolutePath) }
+        composeTestRule.runOnIdle { viewModel.openLocalFolder(root.absolutePath) }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.sessions.value.size == 1 && !viewModel.browseState.value.isLoading
         }
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(root.name))
         composeTestRule.onNodeWithText(root.name).assertIsDisplayed().performClick()
-        composeTestRule.onNodeWithContentDescription("Back").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Go to Home").assertIsDisplayed()
         val previousGeneration = viewModel.sessionClosureGeneration.value
 
         composeTestRule.runOnIdle {
@@ -114,7 +115,7 @@ class SessionAutoCloseNavigationTest {
         composeTestRule.waitUntil(10_000) {
             viewModel.autoCloseSessions.value && viewModel.sessionAutoCloseTimeout.value == SessionAutoCloseTimeout.FIVE_MINUTES
         }
-        composeTestRule.runOnIdle { viewModel.openLocalRoot(root.absolutePath) }
+        composeTestRule.runOnIdle { viewModel.openLocalFolder(root.absolutePath) }
         composeTestRule.waitUntil(10_000) { viewModel.sessions.value.size == 1 && !viewModel.browseState.value.isLoading }
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(root.name))
         composeTestRule.onNodeWithText(root.name).performClick()
@@ -135,11 +136,11 @@ class SessionAutoCloseNavigationTest {
             }
             composeTestRule.onNodeWithContentDescription("Settings").assertIsDisplayed()
             composeTestRule.onNodeWithText("Scan folder").assertDoesNotExist()
-            composeTestRule.runOnIdle { viewModel.openLocalRoot(returningRoot.path) }
+            composeTestRule.runOnIdle { viewModel.openLocalFolder(returningRoot.path) }
             composeTestRule.waitUntil(10_000) { viewModel.sessions.value.size == 1 && !viewModel.browseState.value.isLoading }
             composeTestRule.runOnIdle { viewModel.createFile("after-timeout.txt") }
             composeTestRule.waitUntil(10_000) { returningRoot.resolve("after-timeout.txt").exists() }
-            assertEquals(returningRoot.path, viewModel.sessions.value.single().rootPath)
+            assertEquals(returningRoot.path, viewModel.sessions.value.single().startPath)
         } finally {
             release.complete(Unit)
         }
@@ -160,22 +161,22 @@ class SessionAutoCloseNavigationTest {
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.autoCloseSessions.value
         }
-        composeTestRule.runOnIdle { viewModel.openLocalRoot(root.absolutePath) }
+        composeTestRule.runOnIdle { viewModel.openLocalFolder(root.absolutePath) }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.sessions.value.size == 1 && !viewModel.browseState.value.isLoading
         }
         composeTestRule.onNode(hasScrollToIndexAction()).performScrollToNode(hasText(root.name))
         composeTestRule.onNodeWithText(root.name).assertIsDisplayed().performClick()
-        composeTestRule.onNodeWithContentDescription("Back").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Go to Home").assertIsDisplayed()
         val previousGeneration = viewModel.sessionClosureGeneration.value
 
         composeTestRule.runOnIdle {
             viewModel.onAppBackgrounded(nowMillis = 1_000L)
-            viewModel.openLocalRoot(returningRoot.absolutePath)
+            viewModel.openLocalFolder(returningRoot.absolutePath)
         }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.sessions.value.size == 2 &&
-                viewModel.activeSession.value?.rootPath == returningRoot.absolutePath &&
+                viewModel.activeSession.value?.startPath == returningRoot.absolutePath &&
                 !viewModel.browseState.value.isLoading
         }
         composeTestRule.runOnIdle {
@@ -186,9 +187,9 @@ class SessionAutoCloseNavigationTest {
 
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.sessionClosureGeneration.value == previousGeneration + 1L &&
-                viewModel.sessions.value.singleOrNull()?.rootPath == returningRoot.absolutePath
+                viewModel.sessions.value.singleOrNull()?.startPath == returningRoot.absolutePath
         }
-        composeTestRule.onNodeWithContentDescription("Back").assertIsDisplayed()
+        composeTestRule.onNodeWithContentDescription("Go to Home").assertIsDisplayed()
         composeTestRule.onNodeWithText("Voyager").assertDoesNotExist()
     }
 }

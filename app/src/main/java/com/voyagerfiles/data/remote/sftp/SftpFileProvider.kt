@@ -36,6 +36,8 @@ class SftpFileProvider(
     private val connectionLock = Mutex()
     private var session: Session? = null
 
+    override val hasOpenConnection: Boolean get() = session?.isConnected == true
+
     private fun ensureSessionLocked(): Session {
         session?.takeIf { it.isConnected }?.let { return it }
 

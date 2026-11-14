@@ -31,6 +31,7 @@ import org.junit.Test
 
 class BrowserRefreshGestureTest {
     @get:Rule val compose = createComposeRule()
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     private val app = ApplicationProvider.getApplicationContext<Application>()
     private val root = File(app.cacheDir, "refresh-${UUID.randomUUID()}").apply { mkdirs() }
     private lateinit var viewModel: FileBrowserViewModel
@@ -46,7 +47,7 @@ class BrowserRefreshGestureTest {
     @Test fun emptyFolderCanBePulledToRefresh() {
         viewModel = FileBrowserViewModel(app)
         showBrowser()
-        compose.runOnIdle { viewModel.openLocalRoot(root.path) }
+        compose.runOnIdle { viewModel.openLocalFolder(root.path) }
         compose.waitUntil(5_000) {
             viewModel.browseState.value.let { it.currentPath == root.path && !it.isLoading }
         }
@@ -134,7 +135,7 @@ class BrowserRefreshGestureTest {
         }
         compose.runOnIdle {
             viewModel.setViewMode(mode)
-            viewModel.openLocalRoot(root.path)
+            viewModel.openLocalFolder(root.path)
         }
         compose.waitUntil(10_000) {
             val state = viewModel.browseState.value

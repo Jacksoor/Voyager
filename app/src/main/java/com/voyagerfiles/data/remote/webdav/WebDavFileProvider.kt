@@ -81,6 +81,9 @@ class WebDavFileProvider(
             }
         }
 
+    /** HTTP has no session; this means the signed-in client is set up and keeps its sockets alive. */
+    override val hasOpenConnection: Boolean get() = sardine != null
+
     private fun ensureConnected() {
         if (sardine != null) return
         val client = OkHttpClient.Builder()

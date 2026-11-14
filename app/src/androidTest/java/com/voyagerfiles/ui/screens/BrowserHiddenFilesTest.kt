@@ -145,7 +145,7 @@ class BrowserHiddenFilesTest {
         val model = FileBrowserViewModel(app)
         store.put("browser", model)
         compose.setContent { MaterialTheme { BrowserScreen(model, onNavigateBack = {}) } }
-        compose.runOnIdle { model.openLocalRoot(root.path) }
+        compose.runOnIdle { model.openLocalFolder(root.path) }
         waitForName(model, "notes.txt")
         return model
     }

@@ -28,7 +28,7 @@ class PasteConflictTest {
         val viewModel = FileBrowserViewModel(app)
         compose.setContent {}
         try {
-            compose.runOnIdle { viewModel.openLocalRoot(root.path) }
+            compose.runOnIdle { viewModel.openLocalFolder(root.path) }
             compose.waitUntil(10_000) { viewModel.browseState.value.currentPath == root.path && !viewModel.browseState.value.isLoading }
             compose.runOnIdle { viewModel.navigateTo(source.path) }
             compose.waitUntil(10_000) { viewModel.browseState.value.currentPath == source.path && !viewModel.browseState.value.isLoading }

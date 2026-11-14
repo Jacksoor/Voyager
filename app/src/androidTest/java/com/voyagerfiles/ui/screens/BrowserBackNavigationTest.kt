@@ -54,7 +54,7 @@ class BrowserBackNavigationTest {
         }
 
         composeTestRule.runOnIdle {
-            viewModel.openLocalRoot(root.absolutePath)
+            viewModel.openLocalFolder(root.absolutePath)
         }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.browseState.value.currentPath == root.absolutePath &&

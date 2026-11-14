@@ -412,6 +412,35 @@
         <item quantity="other">%1$d elementi (%2$s)</item>
     </plurals>
     <string name="content_desc_sessions">Sessioni</string>
+    <plurals name="sessions_open_count">
+        <item quantity="one">%d open</item>
+        <item quantity="other">%d open</item>
+    </plurals>
+    <string name="action_show_folder">Show</string>
+    <string name="session_primary_storage">Storage</string>
+    <string name="action_pin_session">Pin</string>
+    <string name="back_clear_selection">Clear selection</string>
+    <string name="back_close_search">Close search</string>
+    <string name="back_leave_browser">Leave</string>
+    <string name="action_set_start_tab">Open on start</string>
+    <string name="action_unset_start_tab">Don\u2019t open on start</string>
+    <string name="session_start_tab">Start tab</string>
+    <string name="settings_start_tab">Start tab</string>
+    <string name="settings_start_tab_none">None. Long-press a pinned tab and choose Open on start.</string>
+    <string name="settings_start_tab_set">%1$s opens when the app starts. Long-press a pinned tab to change it.</string>
+    <string name="action_clear_start_tab">Clear</string>
+    <string name="launch_needs_access">Full storage access is needed to open %1$s</string>
+    <string name="launch_unavailable">%1$s is no longer available</string>
+    <string name="launch_tab_gone">The start tab is no longer open</string>
+    <string name="action_open_in_new_session">Open in new session</string>
+    <string name="action_pin_folder">Pin “%1$s”</string>
+    <string name="session_menu_pinned">Pinned: %1$s\nNow: %2$s</string>
+    <string name="session_pinned_now">Pinned · now in %1$s</string>
+    <string name="action_reset_session">Back to %1$s</string>
+    <string name="location_root_subtitle">Whole file system through su</string>
+    <string name="location_shizuku_subtitle">App data and system folders through Shizuku</string>
+    <string name="action_unpin_session">Unpin</string>
+    <string name="session_pinned">Pinned</string>
     <string name="content_desc_refresh">Rinfrescato</string>
     <string name="content_desc_sort">Ordinare</string>
     <string name="content_desc_more">Di più</string>

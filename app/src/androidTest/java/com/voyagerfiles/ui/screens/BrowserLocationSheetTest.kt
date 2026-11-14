@@ -28,6 +28,7 @@ import java.io.File
 
 class BrowserLocationSheetTest {
     @get:Rule val compose = createComposeRule()
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     private val application = ApplicationProvider.getApplicationContext<Application>()
     private val dao = AppDatabase.getInstance(application).bookmarkDao()
     private val store = ViewModelStore()
@@ -59,7 +60,7 @@ class BrowserLocationSheetTest {
         compose.runOnIdle {
             viewModel = FileBrowserViewModel(application)
             store.put("browser", viewModel)
-            viewModel.openLocalRoot(root.path)
+            viewModel.openLocalFolder(root.path)
         }
     }
 
@@ -98,7 +99,7 @@ class BrowserLocationSheetTest {
         openSheet()
         compose.onNodeWithTag(rowTag(newest)).performScrollTo().assertIsDisplayed().performClick()
 
-        compose.waitUntil(10_000) { viewModel.activeSession.value?.rootPath == newest.path }
+        compose.waitUntil(10_000) { viewModel.activeSession.value?.startPath == newest.path }
         compose.waitUntil(10_000) { viewModel.browseState.value.currentPath == newest.path }
         assertEquals(2, viewModel.sessions.value.size)
         assertEquals(0, leftBrowser)
@@ -147,11 +148,11 @@ class BrowserLocationSheetTest {
         openSheet()
         compose.onNodeWithTag(showAllTag).performScrollTo().performClick()
         compose.onNodeWithTag(rowTag(oldest)).performScrollTo().performClick()
-        compose.waitUntil(10_000) { viewModel.activeSession.value?.rootPath == oldest.path }
+        compose.waitUntil(10_000) { viewModel.activeSession.value?.startPath == oldest.path }
         compose.waitUntil(10_000) { viewModel.bookmarks.value.single { it.path == oldest.path }.lastUsedAt > oldestUsedBefore }
 
         // Close that session again so the bookmark is offered as a location, now as the most recent one.
-        val openedSession = viewModel.sessions.value.single { it.rootPath == oldest.path }
+        val openedSession = viewModel.sessions.value.single { it.startPath == oldest.path }
         compose.runOnIdle { viewModel.closeSession(openedSession.id) }
         compose.waitUntil(10_000) { viewModel.sessions.value.size == 1 }
 

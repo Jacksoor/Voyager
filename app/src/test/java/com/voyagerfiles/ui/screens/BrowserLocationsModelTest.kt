@@ -42,7 +42,7 @@ class BrowserLocationsModelTest {
 
     private fun localSession(rootPath: String) = BrowserSession(
         id = "local:$rootPath",
-        title = rootPath.substringAfterLast('/'),
+        originLabel = rootPath.substringAfterLast('/'),
         source = FileSource.LOCAL,
         rootPath = rootPath,
         currentPath = rootPath,
@@ -50,7 +50,7 @@ class BrowserLocationsModelTest {
 
     private fun remoteSession(connection: RemoteConnection) = BrowserSession(
         id = "remote:${connection.id}",
-        title = connection.name,
+        originLabel = connection.name,
         source = FileSource.SFTP,
         rootPath = "/",
         currentPath = "/",
@@ -94,7 +94,7 @@ class BrowserLocationsModelTest {
     }
 
     @Test
-    fun omitsLocalRootsThatAlreadyHaveASessionAfterNormalization() {
+    fun omitsLocalFoldersASessionIsShowingAfterNormalization() {
         val model = BrowserLocationsModel.forState(
             sessions = listOf(
                 localSession("/storage/emulated/0"),
@@ -106,9 +106,27 @@ class BrowserLocationsModelTest {
             hasAllFilesAccess = true,
         )
 
-        // A bookmark inside an open session's tree is still a new root and stays listed.
+        // A bookmark inside an open session's tree opens its own session and stays listed.
         assertEquals(listOf(downloads), model.bookmarks)
         assertEquals(listOf(sdCard), model.storageVolumes)
+    }
+
+    @Test
+    fun aSessionThatMovedAwayNoLongerHidesWhereItStarted() {
+        val moved = localSession("/storage/emulated/0/DCIM/Camera").copy(
+            rootPath = "/storage/emulated/0",
+            currentPath = "/storage/emulated/0/Download/",
+        )
+        val model = BrowserLocationsModel.forState(
+            sessions = listOf(moved),
+            connections = emptyList(),
+            bookmarks = listOf(downloads, camera),
+            storageVolumes = listOf(internal, sdCard),
+            hasAllFilesAccess = true,
+        )
+
+        assertEquals(listOf(camera), model.bookmarks)
+        assertEquals(listOf(internal, sdCard), model.storageVolumes)
     }
 
     @Test
@@ -188,5 +206,21 @@ class BrowserLocationsModelTest {
 
         val withStorage = empty.copy(storageVolumes = listOf(sdCard))
         assertFalse(withStorage.isEmpty)
+        assertFalse(empty.copy(systemAccess = listOf(SystemAccess.ROOT)).isEmpty)
+    }
+
+    @Test
+    fun rootAndShizukuAreOfferedWhenAvailableAndNotAlreadyOpen() {
+        fun model(sessions: List<BrowserSession>, root: Boolean, shizuku: Boolean) = BrowserLocationsModel.forState(
+            sessions, emptyList(), emptyList(), emptyList(), hasAllFilesAccess = true,
+            rootAvailable = root, shizukuAvailable = shizuku,
+        ).systemAccess
+
+        assertEquals(emptyList<SystemAccess>(), model(emptyList(), root = false, shizuku = false))
+        assertEquals(listOf(SystemAccess.ROOT, SystemAccess.SHIZUKU), model(emptyList(), root = true, shizuku = true))
+        val shizukuSession = BrowserSession("shizuku:/", "Shizuku", FileSource.SHIZUKU, rootPath = "/", currentPath = "/")
+        assertEquals(listOf(SystemAccess.ROOT), model(listOf(shizukuSession), root = true, shizuku = true))
+        val rootSession = shizukuSession.copy(id = "root:/", source = FileSource.ROOT)
+        assertEquals(listOf(SystemAccess.SHIZUKU), model(listOf(rootSession), root = true, shizuku = true))
     }
 }

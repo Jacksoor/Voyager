@@ -1,5 +1,9 @@
 package com.voyagerfiles.ui.screens
 
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.runtime.LaunchedEffect
 import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -8,6 +12,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +35,8 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SdStorage
@@ -55,6 +62,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -92,7 +100,25 @@ fun HomeScreen(
     onRequestAllFilesAccess: () -> Unit,
     onNavigateToCategory: (StorageCategory) -> Unit = {},
     onNavigateToSearch: () -> Unit = {},
+    /** About a start tab that couldn't be opened on launch: shown as a snackbar. */
+    launchMessage: LaunchMessage? = null,
+    onLaunchMessageDone: () -> Unit = {},
 ) {
+    val launchSnackbar = remember { SnackbarHostState() }
+    val launchResources = LocalContext.current.resources
+    LaunchedEffect(launchMessage) {
+        val message = launchMessage
+        if (message == null) {
+            launchSnackbar.currentSnackbarData?.dismiss()
+            return@LaunchedEffect
+        }
+        val text = when (message) {
+            is LaunchMessage.NeedsAccess -> launchResources.getString(R.string.launch_needs_access, message.label)
+            is LaunchMessage.Unavailable -> launchResources.getString(R.string.launch_unavailable, message.label)
+        }
+        launchSnackbar.showSnackbar(message = text, duration = SnackbarDuration.Long)
+        onLaunchMessageDone()
+    }
     val bookmarks by viewModel.bookmarks.collectAsState()
     val dismissedTranslationNotices by viewModel.dismissedTranslationNotices.collectAsState()
     val translationUrl = stringResource(R.string.translation_crowdin_url)
@@ -101,7 +127,6 @@ fun HomeScreen(
     var bookmarkToRemove by remember { mutableStateOf<Bookmark?>(null) }
     val removeBookmarkLabel = stringResource(R.string.action_remove_bookmark)
     val sessions by viewModel.sessions.collectAsState()
-    val activeSession by viewModel.activeSession.collectAsState()
     val homeLayout by viewModel.homeLayout.collectAsState()
     val context = LocalContext.current
     val safTreeLauncher = rememberLauncherForActivityResult(
@@ -126,6 +151,7 @@ fun HomeScreen(
     val localBookmarks = bookmarks.filter { it.source == FileSource.LOCAL }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(launchSnackbar) },
         topBar = {
             TopAppBar(
                 title = { Text(stringResource(R.string.app_name)) },
@@ -263,8 +289,17 @@ fun HomeScreen(
                             items(visibleSessions, key = { "session:${it.id}" }) { session ->
                                 ActiveSessionRow(
                                     session = session,
-                                    isActive = session.id == activeSession?.id,
+                                    canPinMore = SessionBarModel.canPinMore(sessions),
                                     onClick = { onNavigateToSession(session.id, session.currentPath) },
+                                    onClose = viewModel::closeSession,
+                                    onSetPinned = viewModel::setSessionPinned,
+                                    onDisconnect = viewModel::disconnectSession,
+                                    // "Back to <start>" from Home opens the session at its start folder.
+                                    onReset = { id ->
+                                        viewModel.resetSession(id)
+                                        onNavigateToSession(id, session.startPath)
+                                    },
+                                    onSetStartTab = viewModel::setStartTab,
                                 )
                             }
                         }
@@ -552,60 +587,88 @@ internal fun StorageVolumeCard(
     }
 }
 
+/**
+ * An open session on Home. Nothing is shown in Home, so instead of an "active" mark it shows what
+ * the session bar shows: the connection state in the icon and the pin or start-tab badge. A long
+ * press opens the same menu as the bar.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ActiveSessionRow(
     session: BrowserSession,
-    isActive: Boolean,
+    canPinMore: Boolean,
     onClick: () -> Unit,
+    onClose: (String) -> Unit,
+    onSetPinned: (String, Boolean) -> Unit,
+    onDisconnect: (String) -> Unit,
+    onReset: (String) -> Unit,
+    onSetStartTab: (String, Boolean) -> Unit,
 ) {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-        ),
-    ) {
-        Row(
-            modifier = Modifier.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                if (session.source == FileSource.LOCAL || session.source == FileSource.SAF || session.source == FileSource.ROOT || session.source == FileSource.SHIZUKU) {
-                    Icons.Filled.Folder
-                } else {
-                    Icons.Filled.Cloud
+    var menuOpen by remember { mutableStateOf(false) }
+    val pinnedState = stringResource(R.string.session_pinned)
+    val startState = stringResource(R.string.session_start_tab)
+    Box {
+        Card(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(CardDefaults.shape)
+                .combinedClickable(onClick = onClick, onLongClick = { menuOpen = true })
+                .semantics {
+                    if (session.pinned) stateDescription = if (session.isStartTab) "$pinnedState, $startState" else pinnedState
                 },
-                contentDescription = null,
-                tint = if (isActive) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(28.dp),
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    session.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+            colors = CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+            ),
+        ) {
+            Row(
+                modifier = Modifier.padding(14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    sessionIcon(session),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(28.dp),
                 )
-                Text(
-                    session.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (isActive) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    stringResource(R.string.home_session_active),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        session.barLabel,
+                        style = MaterialTheme.typography.titleMedium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        session.description,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                if (session.pinned) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    // The start tab's rocket takes the pin's place, as in the session bar.
+                    Icon(
+                        if (session.isStartTab) Icons.Filled.RocketLaunch else Icons.Filled.PushPin,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
+        SessionMenu(
+            session = session,
+            expanded = menuOpen,
+            onDismiss = { menuOpen = false },
+            canPinMore = canPinMore,
+            onClose = onClose,
+            onSetPinned = onSetPinned,
+            onDisconnect = onDisconnect,
+            onReset = onReset,
+            onSetStartTab = onSetStartTab,
+        )
     }
 }
 

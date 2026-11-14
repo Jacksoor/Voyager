@@ -47,7 +47,7 @@ class ArchiveOperationsTest {
     fun createsAndExtractsZipThroughViewModel() = runBlocking {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = withContext(Dispatchers.Main) {
-            FileBrowserViewModel(application).also { it.openLocalRoot(root.absolutePath) }
+            FileBrowserViewModel(application).also { it.openLocalFolder(root.absolutePath) }
         }
         waitUntil("open test root", viewModel) {
             viewModel.browseState.value.currentPath == root.absolutePath &&
@@ -93,7 +93,7 @@ class ArchiveOperationsTest {
         }
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = withContext(Dispatchers.Main) {
-            FileBrowserViewModel(application).also { it.openLocalRoot(root.absolutePath) }
+            FileBrowserViewModel(application).also { it.openLocalFolder(root.absolutePath) }
         }
         waitUntil("open test root", viewModel) {
             viewModel.browseState.value.currentPath == root.absolutePath &&
@@ -132,7 +132,7 @@ class ArchiveOperationsTest {
         )
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = withContext(Dispatchers.Main) {
-            FileBrowserViewModel(application).also { it.openLocalRoot(root.absolutePath) }
+            FileBrowserViewModel(application).also { it.openLocalFolder(root.absolutePath) }
         }
         waitUntil("open test root", viewModel) {
             viewModel.browseState.value.currentPath == root.absolutePath && !viewModel.browseState.value.isLoading

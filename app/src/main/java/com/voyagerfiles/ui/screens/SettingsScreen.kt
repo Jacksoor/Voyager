@@ -99,6 +99,7 @@ fun SettingsScreen(
     val browseState by viewModel.browseState.collectAsState()
     val useTrash by viewModel.useTrash.collectAsState()
     val confirmRemoteDownloads by viewModel.confirmRemoteDownloads.collectAsState()
+    val startTab = viewModel.sessions.collectAsState().value.firstOrNull { it.isStartTab }
     val autoCloseSessions by viewModel.autoCloseSessions.collectAsState()
     val sessionAutoCloseTimeout by viewModel.sessionAutoCloseTimeout.collectAsState()
     val homeLayout by viewModel.homeLayout.collectAsState()
@@ -451,6 +452,28 @@ fun SettingsScreen(
                 )
                 Spacer(modifier = Modifier.width(12.dp))
                 Switch(checked = confirmRemoteDownloads, onCheckedChange = null)
+            }
+
+            // The start tab is chosen on a pinned tab itself; this row only shows and clears it.
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(stringResource(R.string.settings_start_tab), style = MaterialTheme.typography.bodyLarge)
+                    Text(
+                        startTab?.let { stringResource(R.string.settings_start_tab_set, it.barLabel) }
+                            ?: stringResource(R.string.settings_start_tab_none),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (startTab != null) {
+                    Spacer(modifier = Modifier.width(12.dp))
+                    TextButton(onClick = { viewModel.setStartTab(startTab.id, false) }) {
+                        Text(stringResource(R.string.action_clear_start_tab))
+                    }
+                }
             }
 
             // About section

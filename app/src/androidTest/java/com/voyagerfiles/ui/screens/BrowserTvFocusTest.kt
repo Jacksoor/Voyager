@@ -71,7 +71,7 @@ class BrowserTvFocusTest {
         }
         composeTestRule.runOnIdle {
             viewModel.setViewMode(viewMode)
-            viewModel.openLocalRoot(root.absolutePath)
+            viewModel.openLocalFolder(root.absolutePath)
         }
         return viewModel
     }

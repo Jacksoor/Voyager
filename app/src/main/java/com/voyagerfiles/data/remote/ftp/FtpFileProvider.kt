@@ -35,6 +35,8 @@ class FtpFileProvider(
 
     private var ftpClient: FTPClient? = null
 
+    override val hasOpenConnection: Boolean get() = ftpClient?.isConnected == true
+
     private suspend fun ensureConnected() = withContext(Dispatchers.IO) {
         val existingClient = ftpClient
         if (existingClient != null) {

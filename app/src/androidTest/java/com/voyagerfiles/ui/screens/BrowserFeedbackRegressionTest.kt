@@ -7,7 +7,9 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.compose.ui.test.*
-import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.lifecycle.ViewModelStore
 import androidx.test.core.app.ApplicationProvider
 import com.voyagerfiles.R
@@ -28,7 +30,8 @@ import org.junit.Test
 import java.io.File
 
 class BrowserFeedbackRegressionTest {
-    @get:Rule val compose = createComposeRule()
+    @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     private val application = ApplicationProvider.getApplicationContext<Application>()
     private val prefs = PreferencesManager(application)
     private val store = ViewModelStore()
@@ -71,7 +74,7 @@ class BrowserFeedbackRegressionTest {
         compose.runOnIdle {
             viewModel = FileBrowserViewModel(application)
             store.put("browser", viewModel)
-            viewModel.openLocalRoot(root.path)
+            viewModel.openLocalFolder(root.path)
         }
         compose.setContent {
             hostView = LocalView.current
@@ -125,7 +128,8 @@ class BrowserFeedbackRegressionTest {
         compose.onNodeWithTag("browser-files").performScrollToIndex(45)
         compose.waitForIdle()
         val position = viewModel.directoryScrollPosition
-        assertTrue(position.index > 30)
+        // A wide grid (tablet with the session rail) cannot bring item 45 to the top; it just has to have scrolled.
+        assertTrue(position.index > 0)
         compose.onNode(hasText("folder-045") and hasClickAction()).performClick()
         awaitDirectory(root.resolve("folder-045"))
         compose.runOnIdle { assertTrue(viewModel.navigateUp()) }
@@ -143,7 +147,7 @@ class BrowserFeedbackRegressionTest {
         compose.onNodeWithTag("browser-files").performScrollToIndex(45)
         compose.waitForIdle()
         val position = viewModel.directoryScrollPosition
-        compose.runOnIdle { viewModel.openLocalRoot(peer.path) }
+        compose.runOnIdle { viewModel.openLocalFolder(peer.path) }
         awaitDirectory(peer)
         compose.runOnIdle { viewModel.onDirectoryScrolled(firstId, root.path, ScrollPosition(70, 0)) }
         assertEquals(ScrollPosition.TOP, viewModel.directoryScrollPosition)
@@ -181,6 +185,12 @@ class BrowserFeedbackRegressionTest {
     }
 
     @Test fun bottomSearchKeepsFileListVisibleWhileKeyboardIsOpen() {
+        // Lay out for the keyboard like MainActivity does (edge to edge, adjustResize); the plain
+        // test host lets Android slide the whole window up instead, which no user sees.
+        compose.runOnUiThread {
+            compose.activity.enableEdgeToEdge()
+            compose.activity.window.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
         runBlocking { prefs.setSearchBarMode(SearchBarMode.BOTTOM) }
         showBrowser()
         val search = compose.onNodeWithTag(BROWSER_SEARCH_TEST_TAG)

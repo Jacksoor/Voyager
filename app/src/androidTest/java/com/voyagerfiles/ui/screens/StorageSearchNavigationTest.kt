@@ -67,7 +67,7 @@ class StorageSearchNavigationTest {
         val chosen = chosenFolder.resolve("$needle.txt").apply { writeText("chosen") }
         val browser = (compose.activity.application as VoyagerApp).browserViewModel
         try {
-            compose.runOnIdle { browser.openLocalRoot(firstFolder.canonicalPath) }
+            compose.runOnIdle { browser.openLocalFolder(firstFolder.canonicalPath) }
             compose.waitUntil(10_000) { browser.browseState.value.currentPath == firstFolder.canonicalPath }
             val originalSession = browser.activeSession.value?.id
             compose.onNodeWithContentDescription("Search shared storage").performClick()
@@ -83,10 +83,10 @@ class StorageSearchNavigationTest {
             compose.onNodeWithText("$needle.txt").assertIsDisplayed()
             compose.runOnIdle {
                 assertEquals(FileSource.LOCAL, browser.browseState.value.source)
-                assertEquals(chosenFolder.canonicalPath, browser.activeSession.value?.rootPath)
+                assertEquals(chosenFolder.canonicalPath, browser.activeSession.value?.startPath)
                 assertNotEquals(originalSession, browser.activeSession.value?.id)
             }
-            compose.onNodeWithContentDescription("Back").performClick()
+            androidx.test.espresso.Espresso.pressBack()
             compose.onNodeWithTag("storage-search-query").assertIsDisplayed()
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithContentDescription("Search shared storage").assertIsDisplayed()

@@ -44,6 +44,7 @@ class PreferencesManager(private val context: Context) {
         val DEFAULT_PATH = stringPreferencesKey("default_path")
         val AUTO_CLOSE_SESSIONS = booleanPreferencesKey("auto_close_sessions")
         val SESSION_AUTO_CLOSE_TIMEOUT = stringPreferencesKey("session_auto_close_timeout")
+        val PINNED_SESSIONS = stringPreferencesKey("pinned_sessions")
         val HOME_SECTION_ORDER = stringPreferencesKey("home_section_order")
         val HOME_HIDDEN_SECTIONS = stringPreferencesKey("home_hidden_sections")
         val CUSTOM_PRIMARY = longPreferencesKey("custom_primary")
@@ -137,6 +138,16 @@ class PreferencesManager(private val context: Context) {
     }
 
     val homeLayout: Flow<HomeLayout> = context.dataStore.data.map(::homeLayoutFromPreferences)
+
+    /** Pinned sessions in [com.voyagerfiles.viewmodel.PinnedSessionCodec]'s format. */
+    val pinnedSessions: Flow<String?> = context.dataStore.data.map { prefs -> prefs[Keys.PINNED_SESSIONS] }
+
+    suspend fun setPinnedSessions(encoded: String) {
+        context.dataStore.edit {
+            if (encoded.isEmpty()) it.remove(Keys.PINNED_SESSIONS) else it[Keys.PINNED_SESSIONS] = encoded
+        }
+    }
+
 
     val searchBarMode: Flow<SearchBarMode> = context.dataStore.data.map { prefs ->
         SearchBarMode.fromName(prefs[Keys.SEARCH_BAR_MODE])

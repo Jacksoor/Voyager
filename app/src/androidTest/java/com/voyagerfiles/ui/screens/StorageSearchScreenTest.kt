@@ -47,6 +47,7 @@ import org.junit.Test
 
 class StorageSearchScreenTest {
     @get:Rule val compose = createComposeRule()
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     private val application = ApplicationProvider.getApplicationContext<Application>()
     private val store = ViewModelStore()
     private lateinit var root: File
@@ -210,7 +211,7 @@ class StorageSearchScreenTest {
         val chosen = chosenFolder.resolve("$needle.txt").apply { writeText("chosen") }
         try {
             val browser = browserModel()
-            compose.runOnIdle { browser.openLocalRoot(firstFolder.canonicalPath) }
+            compose.runOnIdle { browser.openLocalFolder(firstFolder.canonicalPath) }
             compose.setContent { MaterialTheme { AppNavigation(browser, true, onRequestAllFilesAccess = {}) } }
             compose.waitUntil(10_000) { browser.browseState.value.currentPath == firstFolder.canonicalPath }
             val originalSession = browser.activeSession.value?.id
@@ -227,12 +228,12 @@ class StorageSearchScreenTest {
             compose.onNodeWithText("$needle.txt").assertIsDisplayed()
             compose.runOnIdle {
                 assertEquals(FileSource.LOCAL, browser.browseState.value.source)
-                assertEquals(chosenFolder.canonicalPath, browser.activeSession.value?.rootPath)
+                assertEquals(chosenFolder.canonicalPath, browser.activeSession.value?.startPath)
                 assertNotEquals(originalSession, browser.activeSession.value?.id)
             }
             assertEquals("first", first.readText())
             assertEquals("chosen", chosen.readText())
-            compose.onNodeWithContentDescription("Back").performClick()
+            androidx.test.espresso.Espresso.pressBack()
             compose.onNodeWithTag("storage-search-query").assertIsDisplayed()
         } finally {
             fixture.deleteRecursively()
