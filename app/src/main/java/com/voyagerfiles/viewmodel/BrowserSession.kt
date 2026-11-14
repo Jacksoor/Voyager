@@ -40,9 +40,20 @@ data class BrowserSession(
     val hasConnection: Boolean
         get() = source.isNetwork || source == FileSource.SHIZUKU
 
-    /** Root and Shizuku sessions need a permission step on every start, so they cannot be restored. */
+    /**
+     * Root asks for `su` on every start, so its sessions are not kept. A Shizuku tab comes back
+     * disconnected and connects again when it is opened, like a server tab.
+     */
     val canPin: Boolean
-        get() = source != FileSource.ROOT && source != FileSource.SHIZUKU
+        get() = source != FileSource.ROOT
+
+    /** The start tab opens on launch without asking: Shizuku may need its permission first. */
+    val canBeStartTab: Boolean
+        get() = pinned && source != FileSource.SHIZUKU
+
+    /** Disconnect keeps a server tab and frees the server; for Shizuku it would be the same as closing. */
+    val canDisconnect: Boolean
+        get() = source.isNetwork && connected
 
     /** The current folder's name, or [originLabel] at the root and where paths are not readable (SAF). */
     val label: String

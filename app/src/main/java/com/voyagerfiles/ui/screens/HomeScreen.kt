@@ -627,7 +627,7 @@ private fun ActiveSessionRow(
                 Icon(
                     sessionIcon(session),
                     contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = sessionIconAlpha(session)),
                     modifier = Modifier.size(28.dp),
                 )
                 Spacer(modifier = Modifier.width(12.dp))

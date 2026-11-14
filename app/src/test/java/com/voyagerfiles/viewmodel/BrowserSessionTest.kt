@@ -3,6 +3,8 @@ package com.voyagerfiles.viewmodel
 import com.voyagerfiles.data.model.FileSource
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
+import org.junit.Assert.assertFalse
 import org.junit.Test
 
 class BrowserSessionTest {
@@ -71,5 +73,24 @@ class BrowserSessionTest {
         assertNull(BrowserNavigationBounds.containingRoot("/data/user/0/com.voyagerfiles/cache", roots))
         assertNull(BrowserNavigationBounds.containingRoot("/storage/emulated/01", roots))
         assertNull(BrowserNavigationBounds.containingRoot("/x", listOf("/")))
+    }
+
+    @Test
+    fun aShizukuTabCanBePinnedButNotStartTheAppOrDisconnect() {
+        val shizuku = BrowserSession(
+            id = "shizuku:/",
+            originLabel = "Shizuku",
+            source = FileSource.SHIZUKU,
+            rootPath = "/",
+            currentPath = "/storage/emulated/0/Android",
+            pinned = true,
+            connected = true,
+        )
+        assertTrue(shizuku.canPin)
+        assertFalse(shizuku.canBeStartTab)
+        assertFalse(shizuku.canDisconnect)
+        assertFalse(shizuku.copy(source = FileSource.ROOT).canPin)
+        assertTrue(shizuku.copy(source = FileSource.SFTP).canDisconnect)
+        assertTrue(shizuku.copy(source = FileSource.LOCAL).canBeStartTab)
     }
 }

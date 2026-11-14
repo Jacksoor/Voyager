@@ -206,6 +206,8 @@ fun BrowserScreen(
     onOpenRoot: () -> Unit = {},
     /** Connects Shizuku (same dialog as Settings) and opens or reconnects its session. */
     onOpenShizuku: () -> Unit = {},
+    /** Opens a disconnected Shizuku tab: connects right away, or asks when it can't. */
+    onReconnectShizuku: () -> Unit = onOpenShizuku,
     isTelevision: Boolean =
         LocalConfiguration.current.uiMode and Configuration.UI_MODE_TYPE_MASK == Configuration.UI_MODE_TYPE_TELEVISION,
     launchPlaybackIntent: ((Intent) -> Unit)? = null,
@@ -608,7 +610,7 @@ fun BrowserScreen(
         focusManager.clearFocus(force = true)
         val target = sessions.firstOrNull { it.id == id }
         // A closed Shizuku session needs a new connection, which only the Shizuku dialog can make.
-        if (target?.source == FileSource.SHIZUKU && !target.connected) onOpenShizuku()
+        if (target?.source == FileSource.SHIZUKU && !target.connected) onReconnectShizuku()
         else if (id != activeSession?.id) viewModel.activateSession(id)
     }
     // The bottom bar has four tab cells; the rail reports how many fit itself.
@@ -2130,8 +2132,8 @@ private fun SessionRow(
             imageVector = sessionIcon(session),
             contentDescription = null,
             modifier = Modifier.size(28.dp),
-            tint = if (isActive) MaterialTheme.colorScheme.primary
-            else MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = (if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+                .copy(alpha = sessionIconAlpha(session)),
         )
         Spacer(modifier = Modifier.size(16.dp))
         Column(modifier = Modifier.weight(1f)) {
