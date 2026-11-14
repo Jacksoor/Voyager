@@ -537,4 +537,19 @@
     <string name="share_receive_failed">Could not receive shared files. Share files with read access and try again.</string>
     <string name="search_stale_item">This item changed or is no longer accessible. Search again.</string>
     <string name="search_no_matching_items">No matching files or folders</string>
+    <string name="search_idle_hint">Find files and folders on this device by name.</string>
+    <string name="search_walking_unindexed">Searching folders the media index leaves out…</string>
+    <string name="search_unindexed_action">Search unindexed folders</string>
+    <string name="search_unindexed_explained">Folders with a .nomedia file and files written by root or Shizuku are not in Android\'s media index, so finding them takes a few seconds.</string>
+    <string name="search_unindexed_every_time">Search unindexed folders every time</string>
+    <string name="search_repair_media_index">Fix the media index</string>
+    <string name="search_incomplete">The search stopped early.</string>
+    <plurals name="search_inaccessible_folders">
+        <item quantity="one">%d folder could not be read</item>
+        <item quantity="other">%d folders could not be read</item>
+    </plurals>
+    <plurals name="search_repaired_entries">
+        <item quantity="one">Updated the media index for %d item</item>
+        <item quantity="other">Updated the media index for %d items</item>
+    </plurals>
 </resources>
