@@ -124,6 +124,18 @@ internal fun sessionMenuEntries(
     }
 }
 
+/**
+ * [value] while [open], and the last value from then once it closes: an entry runs as the menu
+ * starts to fade, and must not change the menu (a "Back to" entry vanishing) while it does.
+ */
+@Composable
+private fun <T : Any> keptWhileClosing(open: Boolean, value: T): T {
+    val kept = remember { arrayOfNulls<Any>(1) }
+    if (open || kept[0] == null) kept[0] = value
+    @Suppress("UNCHECKED_CAST")
+    return kept[0] as T
+}
+
 @Composable
 private fun SessionMenuHeaderText(text: String) {
     Text(
@@ -151,9 +163,10 @@ internal fun SessionMenu(
     onReset: (String) -> Unit,
     onSetStartTab: (String, Boolean) -> Unit,
 ) {
-    val entries = sessionMenuEntries(session, canPinMore, onClose, onSetPinned, onDisconnect, onReset, onSetStartTab)
+    val entries = keptWhileClosing(expanded, sessionMenuEntries(session, canPinMore, onClose, onSetPinned, onDisconnect, onReset, onSetStartTab))
+    val header = keptWhileClosing(expanded, sessionMenuHeader(session))
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        SessionMenuHeaderText(sessionMenuHeader(session))
+        SessionMenuHeaderText(header)
         entries.forEach { entry ->
             DropdownMenuItem(
                 text = { Text(entry.label) },
@@ -250,6 +263,9 @@ internal fun Modifier.tabMenuDrag(state: TabMenuState, haptics: HapticFeedback):
         }
 }
 
+/** A tab's long press opens its menu a little sooner than Android's default (400 ms on most phones). */
+internal const val TAB_MENU_LONG_PRESS_MS = 300L
+
 /** Where a tab's menu goes: right above a bar tab, or beside a rail tab, kept on screen. */
 private class TabMenuPosition(private val beside: Boolean, private val gap: Int) : PopupPositionProvider {
     override fun calculatePosition(
@@ -285,7 +301,7 @@ internal fun SessionTabMenu(
     onReset: (String) -> Unit,
     onSetStartTab: (String, Boolean) -> Unit,
 ) {
-    val entries = sessionMenuEntries(session, canPinMore, onClose, onSetPinned, onDisconnect, onReset, onSetStartTab)
+    val entries = keptWhileClosing(state.expanded, sessionMenuEntries(session, canPinMore, onClose, onSetPinned, onDisconnect, onReset, onSetStartTab))
     state.entries = entries
     val visible = remember { MutableTransitionState(false) }
     visible.targetState = state.expanded
@@ -294,7 +310,7 @@ internal fun SessionTabMenu(
         return
     }
     val gap = with(LocalDensity.current) { 4.dp.roundToPx() }
-    val header = sessionMenuHeader(session)
+    val header = keptWhileClosing(state.expanded, sessionMenuHeader(session))
     Popup(
         popupPositionProvider = remember(beside, gap) { TabMenuPosition(beside, gap) },
         onDismissRequest = state::dismiss,
@@ -303,7 +319,7 @@ internal fun SessionTabMenu(
         val easing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
         AnimatedVisibility(
             visibleState = visible,
-            enter = fadeIn(tween(120)) + scaleIn(tween(160, easing = easing), initialScale = 0.9f, transformOrigin = TransformOrigin(0.5f, if (beside) 0f else 1f)),
+            enter = fadeIn(tween(90)) + scaleIn(tween(120, easing = easing), initialScale = 0.92f, transformOrigin = TransformOrigin(0.5f, if (beside) 0f else 1f)),
             exit = fadeOut(tween(90)),
         ) {
             Surface(
