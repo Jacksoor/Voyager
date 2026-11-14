@@ -55,6 +55,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.platform.ViewConfiguration
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
@@ -304,24 +307,33 @@ private fun SessionBarCell(
             val session = slot.session
             val menu = remember { TabMenuState() }
             val haptics = LocalHapticFeedback.current
+            val viewConfiguration = LocalViewConfiguration.current
+            val quickLongPress = remember(viewConfiguration) {
+                object : ViewConfiguration by viewConfiguration {
+                    override val longPressTimeoutMillis: Long
+                        get() = minOf(TAB_MENU_LONG_PRESS_MS, viewConfiguration.longPressTimeoutMillis)
+                }
+            }
             Box(modifier = cellModifier.tabMenuDrag(menu, haptics)) {
-                BarItem(
-                    icon = sessionIcon(session),
-                    iconAlpha = sessionIconAlpha(session),
-                    label = session.barLabel,
-                    selected = session.id == activeSessionId,
-                    onClick = { onSelect(session.id) },
-                    onLongClick = {
-                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-                        menu.open()
-                    },
-                    pinned = session.pinned,
-                    startTab = session.isStartTab,
-                    sublabel = if (session.pinned && session.isAwayFromStart) "› ${session.label}" else null,
-                    labelLines = labelLines,
-                    compact = labelLines == 1,
-                    modifier = Modifier.fillMaxWidth().testTag(sessionBarItemTestTag(session.id)),
-                )
+                CompositionLocalProvider(LocalViewConfiguration provides quickLongPress) {
+                    BarItem(
+                        icon = sessionIcon(session),
+                        iconAlpha = sessionIconAlpha(session),
+                        label = session.barLabel,
+                        selected = session.id == activeSessionId,
+                        onClick = { onSelect(session.id) },
+                        onLongClick = {
+                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            menu.open()
+                        },
+                        pinned = session.pinned,
+                        startTab = session.isStartTab,
+                        sublabel = if (session.pinned && session.isAwayFromStart) "› ${session.label}" else null,
+                        labelLines = labelLines,
+                        compact = labelLines == 1,
+                        modifier = Modifier.fillMaxWidth().testTag(sessionBarItemTestTag(session.id)),
+                    )
+                }
                 SessionTabMenu(
                     session = session,
                     state = menu,
