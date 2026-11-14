@@ -1003,7 +1003,7 @@ fun BrowserScreen(
                                 onNavigate = ::navigateTo,
                                 rootPath = activeSession?.rootPath,
                                 rootLabel = activeSession?.originLabel,
-                                limitPath = activeSession?.takeIf { it.pinned }?.limitPath,
+                                limitPath = activeSession?.takeIf { it.heldAtStart }?.limitPath,
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(start = 16.dp, end = 16.dp, bottom = 8.dp),

@@ -30,6 +30,39 @@ class StorageSearchNavigationTest {
     @get:Rule val compose = createAndroidComposeRule<MainActivity>()
 
     @Test
+    fun searchResultsOpenInOneSearchTabHeldAtTheResult() {
+        assumeTrue("Full storage access is required", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+        val fixture = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "voyager-search-tab-${UUID.randomUUID()}")
+        val first = fixture.resolve("one/inner").apply { mkdirs() }
+        val second = fixture.resolve("two").apply { mkdirs() }
+        val browser = (compose.activity.application as VoyagerApp).browserViewModel
+        try {
+            compose.runOnIdle { browser.openSearchResult(first.canonicalPath) }
+            compose.waitUntil(10_000) { browser.browseState.value.currentPath == first.canonicalPath && !browser.browseState.value.isLoading }
+            val searchTab = browser.activeSession.value!!
+            assertTrue(searchTab.fromSearch)
+            // Back from the result leaves the browser (to the search) rather than going up.
+            compose.runOnIdle { assertNull(browser.upTarget()) }
+
+            compose.runOnIdle { browser.openSearchResult(second.canonicalPath) }
+            compose.waitUntil(10_000) { browser.browseState.value.currentPath == second.canonicalPath && !browser.browseState.value.isLoading }
+            assertEquals(searchTab.id, browser.activeSession.value?.id)
+            assertEquals(1, browser.sessions.value.count { it.fromSearch })
+            assertEquals(second.canonicalPath, browser.activeSession.value?.startPath)
+
+            // Pinned, it is an ordinary pin, and the next result opens a new search tab.
+            compose.runOnIdle { browser.setSessionPinned(searchTab.id, true) }
+            compose.runOnIdle { browser.openSearchResult(first.canonicalPath) }
+            compose.waitUntil(10_000) { browser.browseState.value.currentPath == first.canonicalPath && !browser.browseState.value.isLoading }
+            assertNotEquals(searchTab.id, browser.activeSession.value?.id)
+            assertFalse(browser.sessions.value.single { it.id == searchTab.id }.fromSearch)
+            compose.runOnIdle { browser.setSessionPinned(searchTab.id, false) }
+        } finally {
+            fixture.deleteRecursively()
+        }
+    }
+
+    @Test
     fun folderResultsAndBrowserSearchShareTheSameStorageSearch() {
         assumeTrue("Full storage access is required", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
         val fixture = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "voyager-combined-${UUID.randomUUID()}").apply { mkdirs() }
