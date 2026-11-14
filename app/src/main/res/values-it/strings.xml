@@ -537,7 +537,6 @@
     <string name="search_storage_scope">File presenti nell\'archiviazione condivisa montata e accessibile.</string>
     <string name="search_file_name">Nome file</string>
     <string name="search_ready">Inserisci un nome file e scegli Cerca.</string>
-    <string name="search_results_for">Risultati per %1$s</string>
     <string name="search_permission_required">Per cercare nell\'archiviazione condivisa è necessario l\'accesso a tutti i file.</string>
     <string name="search_stale_file">Questo file è stato modificato oppure non è più accessibile. Cerca di nuovo.</string>
     <string name="search_no_matches">Nessun file corrispondente</string>
@@ -551,9 +550,6 @@
     <string name="share_choose_destination">Scegli una cartella per i file condivisi (%1$d)</string>
     <string name="share_save_here">Salva qui</string>
     <string name="share_receive_failed">Impossibile ricevere i file condivisi. Condividi i file con accesso in lettura e riprova.</string>
-    <string name="search_storage_items_scope">File e cartelle presenti nell\'archiviazione condivisa montata e accessibile.</string>
-    <string name="search_item_name">Nome file o cartella</string>
-    <string name="search_items_ready">Inserisci un nome di file o cartella e scegli Cerca.</string>
     <string name="search_stale_item">Questo elemento è stato modificato oppure non è più accessibile. Cerca di nuovo.</string>
     <string name="search_no_matching_items">Nessun file o cartella corrispondente</string>
 </resources>

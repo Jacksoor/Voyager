@@ -31,6 +31,8 @@ class PreferencesManager(private val context: Context) {
         val SEARCH_BAR_MODE = stringPreferencesKey("search_bar_mode")
         val THEME = stringPreferencesKey("theme")
         val SHOW_HIDDEN = booleanPreferencesKey("show_hidden")
+        val SEARCH_UNINDEXED = booleanPreferencesKey("search_unindexed")
+        val SEARCH_REPAIR_MEDIA_INDEX = booleanPreferencesKey("search_repair_media_index")
         val USE_TRASH = booleanPreferencesKey("use_trash")
         val CONFIRM_REMOTE_DOWNLOADS = booleanPreferencesKey("confirm_remote_downloads")
         val DUPLICATE_EXCLUSION_KEYWORDS = stringSetPreferencesKey("duplicate_exclusion_keywords")
@@ -58,6 +60,12 @@ class PreferencesManager(private val context: Context) {
     val showHidden: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[Keys.SHOW_HIDDEN] ?: false
     }
+
+    /** Storage search also walks the folders MediaStore leaves out, every time. */
+    val searchUnindexed: Flow<Boolean> = context.dataStore.data.map { it[Keys.SEARCH_UNINDEXED] ?: false }
+
+    /** A full search walk reports what MediaStore got wrong to the media scanner. */
+    val searchRepairMediaIndex: Flow<Boolean> = context.dataStore.data.map { it[Keys.SEARCH_REPAIR_MEDIA_INDEX] ?: true }
 
     val useTrash: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[Keys.USE_TRASH] ?: true
@@ -164,6 +172,14 @@ class PreferencesManager(private val context: Context) {
 
     suspend fun setShowHidden(show: Boolean) {
         context.dataStore.edit { it[Keys.SHOW_HIDDEN] = show }
+    }
+
+    suspend fun setSearchUnindexed(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.SEARCH_UNINDEXED] = enabled }
+    }
+
+    suspend fun setSearchRepairMediaIndex(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.SEARCH_REPAIR_MEDIA_INDEX] = enabled }
     }
 
     suspend fun setUseTrash(useTrash: Boolean) {

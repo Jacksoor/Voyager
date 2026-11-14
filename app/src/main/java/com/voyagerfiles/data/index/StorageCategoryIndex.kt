@@ -70,15 +70,22 @@ class StorageCategoryIndex(
         hasPermission: () -> Boolean,
     ): Flow<CategoryIndexState> = scanMatching(volumes, showHidden, hasPermission, accepts = category.filter::matches)
 
+    /**
+     * Files and folders whose name contains every word of [query]. [onVisit] sees every file and
+     * folder the walk reaches, matching or not (to compare the walk with MediaStore).
+     */
     fun search(
         query: String,
         volumes: List<StorageVolumeInfo>,
         showHidden: Boolean,
+        onVisit: ((path: String, isDirectory: Boolean) -> Unit)? = null,
         hasPermission: () -> Boolean,
     ): Flow<CategoryIndexState> {
-        val name = query.trim()
-        require(name.isNotEmpty()) { "Enter a file name to search" }
-        return scanMatching(volumes, showHidden, hasPermission, includeDirectories = true) { it.name.contains(name, ignoreCase = true) }
+        val terms = SearchTerms.parse(query)
+        require(terms.isNotEmpty()) { "Enter a file name to search" }
+        return scanMatching(volumes, showHidden, hasPermission, includeDirectories = true, onVisit = onVisit) {
+            SearchTerms.matches(it.name, terms)
+        }
     }
 
     private fun scanMatching(
@@ -86,6 +93,7 @@ class StorageCategoryIndex(
         showHidden: Boolean,
         hasPermission: () -> Boolean,
         includeDirectories: Boolean = false,
+        onVisit: ((path: String, isDirectory: Boolean) -> Unit)? = null,
         accepts: (FileItem) -> Boolean,
     ): Flow<CategoryIndexState> = flow {
         val matches = mutableListOf<FileItem>()
@@ -135,10 +143,13 @@ class StorageCategoryIndex(
                     skipped()
                     return
                 }
-                if (!canRead(path)) {
+                // Folders only: a check per file costs more than the rest of the walk (4 s vs 10 s
+                // for 31k files on a phone), and an unreadable folder is what hides files.
+                if (attributes.isDirectory && !canRead(path)) {
                     inaccessible()
                     return
                 }
+                if (depth > 0) onVisit?.invoke(path.toString(), attributes.isDirectory)
                 val file = FileItem(
                     name = path.fileName?.toString() ?: path.toString(),
                     path = path.toString(),
@@ -221,7 +232,22 @@ class StorageCategoryIndex(
     }.flowOn(Dispatchers.IO)
 
     /** A result is a snapshot; reject removed, replaced, unreadable or out-of-scope files before opening it. */
-    fun isCurrent(file: FileItem, volumes: List<StorageVolumeInfo>, hasPermission: () -> Boolean): Boolean {
+    fun isCurrent(file: FileItem, volumes: List<StorageVolumeInfo>, hasPermission: () -> Boolean): Boolean =
+        check(file, volumes, hasPermission, allowContentChanges = false)
+
+    /**
+     * Like [isCurrent], but a file whose size or time differ still counts: for results from
+     * MediaStore, which can lag behind a file's last write.
+     */
+    fun isOpenable(file: FileItem, volumes: List<StorageVolumeInfo>, hasPermission: () -> Boolean): Boolean =
+        check(file, volumes, hasPermission, allowContentChanges = true)
+
+    private fun check(
+        file: FileItem,
+        volumes: List<StorageVolumeInfo>,
+        hasPermission: () -> Boolean,
+        allowContentChanges: Boolean,
+    ): Boolean {
         if (!hasPermission()) return false
         return try {
             val path = java.io.File(file.path).toPath()
@@ -235,8 +261,10 @@ class StorageCategoryIndex(
             val attributes = Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
             val sameTypeAndSize = if (file.isDirectory) attributes.isDirectory
                 else attributes.isRegularFile && attributes.size() == file.size
-            inScope && sameTypeAndSize &&
-                attributes.lastModifiedTime().toMillis() == file.lastModified.time && hasPermission()
+            val unchanged = allowContentChanges || sameTypeAndSize &&
+                attributes.lastModifiedTime().toMillis() == file.lastModified.time
+            val sameType = if (file.isDirectory) attributes.isDirectory else attributes.isRegularFile
+            inScope && sameType && unchanged && hasPermission()
         } catch (_: IOException) {
             false
         } catch (_: SecurityException) {
