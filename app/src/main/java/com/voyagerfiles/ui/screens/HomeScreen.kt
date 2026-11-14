@@ -127,6 +127,7 @@ fun HomeScreen(
     var bookmarkToRemove by remember { mutableStateOf<Bookmark?>(null) }
     val removeBookmarkLabel = stringResource(R.string.action_remove_bookmark)
     val sessions by viewModel.sessions.collectAsState()
+    val pinCapacity by viewModel.pinCapacity.collectAsState()
     val homeLayout by viewModel.homeLayout.collectAsState()
     val context = LocalContext.current
     val safTreeLauncher = rememberLauncherForActivityResult(
@@ -289,14 +290,16 @@ fun HomeScreen(
                             items(visibleSessions, key = { "session:${it.id}" }) { session ->
                                 ActiveSessionRow(
                                     session = session,
-                                    canPinMore = SessionBarModel.canPinMore(sessions),
+                                    canPinMore = SessionBarModel.canPinMore(sessions, pinCapacity),
                                     onClick = { onNavigateToSession(session.id, session.currentPath) },
                                     onClose = viewModel::closeSession,
                                     onSetPinned = viewModel::setSessionPinned,
                                     onDisconnect = viewModel::disconnectSession,
                                     // "Back to <start>" from Home opens the session at its start folder.
+                                    // Only moves the tab back; onNavigateToSession opens it, so it is
+                                    // activated (and listed) once.
                                     onReset = { id ->
-                                        viewModel.resetSession(id)
+                                        viewModel.rewindSession(id)
                                         onNavigateToSession(id, session.startPath)
                                     },
                                     onSetStartTab = viewModel::setStartTab,

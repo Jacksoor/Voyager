@@ -130,15 +130,26 @@ class SessionBarModelTest {
         val storage = session("storage", 6)
         val sessions = listOf(nas, otherServer, downloads, storage)
         // The disconnected server at 8 would connect again, so the local session at 6 wins.
-        assertEquals("storage", SessionBarModel.sessionAfterDisconnect(sessions, "nas")?.id)
-        assertEquals("nas", SessionBarModel.sessionAfterDisconnect(sessions + otherServer.copy(id = "x", lastUsed = 1), "storage")?.id)
+        assertEquals("storage", SessionBarModel.nextSessionToShow(sessions, setOf("nas"))?.id)
+        assertEquals("nas", SessionBarModel.nextSessionToShow(sessions + otherServer.copy(id = "x", lastUsed = 1), setOf("storage"))?.id)
     }
 
     @Test
     fun disconnectingTheOnlyUsableSessionGoesHome() {
         val nas = session("nas", 9).copy(source = FileSource.FTP, connected = true)
         val otherServer = session("sftp", 8).copy(source = FileSource.SFTP, connected = false)
-        assertEquals(null, SessionBarModel.sessionAfterDisconnect(listOf(nas, otherServer), "nas"))
-        assertEquals(null, SessionBarModel.sessionAfterDisconnect(listOf(nas), "nas"))
+        assertEquals(null, SessionBarModel.nextSessionToShow(listOf(nas, otherServer), setOf("nas")))
+        assertEquals(null, SessionBarModel.nextSessionToShow(listOf(nas), setOf("nas")))
+    }
+
+    @Test
+    fun closingNeverOpensAPinWaitingForItsConnection() {
+        // After a restart every pin has lastUsed 0; a Shizuku or server pin isn't connected yet.
+        val shizuku = session("shizuku", 0).copy(source = FileSource.SHIZUKU, pinned = true, connected = false)
+        val nas = session("nas", 0).copy(source = FileSource.FTP, pinned = true, connected = false)
+        val shown = session("shown", 5)
+        assertEquals(null, SessionBarModel.nextSessionToShow(listOf(shizuku, nas, shown), setOf("shown")))
+        val pictures = session("pictures", 0).copy(pinned = true)
+        assertEquals("pictures", SessionBarModel.nextSessionToShow(listOf(shizuku, pictures, nas, shown), setOf("shown"))?.id)
     }
 }

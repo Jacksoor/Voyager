@@ -18,6 +18,7 @@ import com.voyagerfiles.data.model.ConnectionProtocol
 import com.voyagerfiles.data.model.FileItem
 import com.voyagerfiles.data.model.FileSource
 import com.voyagerfiles.data.model.RemoteConnection
+import com.voyagerfiles.data.model.SessionAutoCloseTimeout
 import com.voyagerfiles.data.repository.FileProvider
 import com.voyagerfiles.data.repository.LocalFileProvider
 import com.voyagerfiles.data.local.AppDatabase
@@ -165,8 +166,10 @@ class BrowserSessionConnectionTest {
     }) { started, _ ->
         val plan = runBlocking { started.startTabPlan(hasAllFilesAccess = true) }
         assertTrue(plan is StartTabPlan.Server)
-        assertEquals(null, runBlocking { started.openServerStartTab((plan as StartTabPlan.Server).sessionId) })
-        assertEquals("/music", started.browseState.value.currentPath)
+        // Navigation opens it like this, in the browser.
+        compose.runOnIdle { started.activateSession((plan as StartTabPlan.Server).sessionId) }
+        compose.waitUntil(10_000) { started.browseState.value.currentPath == "/music" && !started.browseState.value.isLoading }
+        assertEquals(null, started.browseState.value.error)
         assertEquals(1, server.listings)
     }
 
@@ -175,14 +178,63 @@ class BrowserSessionConnectionTest {
         provider = UnreachableServer(),
     ) { started, _ ->
         val plan = runBlocking { started.startTabPlan(hasAllFilesAccess = true) } as StartTabPlan.Server
-        val failure = runBlocking { started.openServerStartTab(plan.sessionId) }
-        assertTrue(failure != null)
+        compose.runOnIdle { started.activateSession(plan.sessionId) }
+        compose.waitUntil(10_000) { started.browseState.value.error != null }
     }
 
     @Test fun aStartTabWhoseConnectionIsGoneIsReportedUnavailable() = withLaunch({ id, _ ->
         listOf(PinnedSession.Remote(id + 1000, "/music", "/music", isStart = true))
     }) { started, _ ->
         assertEquals(StartTabPlan.Unavailable("music"), runBlocking { started.startTabPlan(hasAllFilesAccess = true) })
+    }
+
+    @Test fun aMissingServerStartTabIsNamedByItsServer() = withLaunch({ id, _ ->
+        listOf(PinnedSession.Remote(id + 1000, "/", "/music", isStart = true, name = "Old NAS"))
+    }) { started, _ ->
+        assertEquals(StartTabPlan.Unavailable("Old NAS"), runBlocking { started.startTabPlan(hasAllFilesAccess = true) })
+    }
+
+    @Test fun closingTheShownTabLeavesAShizukuPinWaitingToConnectAlone() = withLaunch({ _, _ ->
+        listOf(PinnedSession.Shizuku("/", "/storage/emulated/0"))
+    }) { started, folder ->
+        compose.waitUntil(10_000) { started.pinsRestored.value }
+        compose.runOnIdle { started.openLocalFolder(folder.path) }
+        compose.waitUntil(10_000) { started.activeSession.value?.source == FileSource.LOCAL && !started.browseState.value.isLoading }
+        compose.runOnIdle { started.closeSession(started.activeSession.value!!.id) }
+        compose.waitUntil(10_000) { started.sessions.value.size == 1 }
+        assertEquals(null, started.activeSession.value)
+        assertEquals(FileSource.SHIZUKU, started.sessions.value.single().source)
+    }
+
+    @Test fun autoClosingTheShownTabLeavesAShizukuPinWaitingToConnectAlone() = withLaunch({ _, _ ->
+        listOf(PinnedSession.Shizuku("/", "/storage/emulated/0"))
+    }) { started, folder ->
+        val autoClose = runBlocking { prefs.autoCloseSessions.first() }
+        val timeout = runBlocking { prefs.sessionAutoCloseTimeout.first() }
+        runBlocking {
+            prefs.setAutoCloseSessions(true)
+            prefs.setSessionAutoCloseTimeout(SessionAutoCloseTimeout.FIVE_MINUTES)
+        }
+        try {
+            compose.waitUntil(10_000) {
+                started.pinsRestored.value && started.autoCloseSessions.value &&
+                    started.sessionAutoCloseTimeout.value == SessionAutoCloseTimeout.FIVE_MINUTES
+            }
+            compose.runOnIdle { started.openLocalFolder(folder.path) }
+            compose.waitUntil(10_000) { started.activeSession.value?.source == FileSource.LOCAL && !started.browseState.value.isLoading }
+            // Before the fix this crashed: the Shizuku pin was picked and has no provider yet.
+            compose.runOnIdle {
+                started.onAppBackgrounded(1_000L)
+                started.onAppForegrounded(1_000L + SessionAutoCloseTimeout.FIVE_MINUTES.durationMillis)
+            }
+            compose.waitUntil(10_000) { started.sessions.value.size == 1 }
+            assertEquals(null, started.activeSession.value)
+        } finally {
+            runBlocking {
+                prefs.setAutoCloseSessions(autoClose)
+                prefs.setSessionAutoCloseTimeout(timeout)
+            }
+        }
     }
 
     @Test fun thereIsOneStartTabAndUnpinningClearsIt() = withLaunch({ _, folder ->

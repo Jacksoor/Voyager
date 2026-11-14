@@ -95,8 +95,8 @@ internal fun sessionMenuEntries(
         add(
             SessionMenuEntry(
                 label = if (session.pinned) stringResource(R.string.action_unpin_session)
-                // A server is pinned as a whole, under its name.
-                else stringResource(R.string.action_pin_folder, if (session.connectionId != null) session.originLabel else session.label),
+                // A server or Shizuku is pinned as a whole, under its name.
+                else stringResource(R.string.action_pin_folder, if (session.pinsWholePlace) session.originLabel else session.label),
                 icon = if (session.pinned) Icons.Outlined.PushPin else Icons.Filled.PushPin,
                 // Unpinning always works; pinning only while the bar has a cell for it.
                 enabled = session.pinned || canPinMore,

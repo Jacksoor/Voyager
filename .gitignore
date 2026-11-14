@@ -18,3 +18,5 @@ local.properties
 /.worktrees/
 /.superpowers/
 /.kotlin/
+__pycache__/
+*.pyc

@@ -39,6 +39,17 @@ class PinnedSessionCodecTest {
     }
 
     @Test
+    fun aServerPinKeepsTheServersNameAndOldLinesReadWithoutOne() {
+        val pins = listOf(
+            PinnedSession.Remote(3, "/", "/music", isStart = true, name = "Fritz\tNAS 100%"),
+            PinnedSession.Remote(4, "/", "/"),
+        )
+        assertEquals(pins, PinnedSessionCodec.decode(PinnedSessionCodec.encode(pins)))
+        val oldLine = listOf("remote", "3", "%2F", "%2Fmusic", "start").joinToString("\t")
+        assertEquals(listOf(PinnedSession.Remote(3, "/", "/music", isStart = true)), PinnedSessionCodec.decode(oldLine))
+    }
+
+    @Test
     fun nothingStoredMeansNoPins() {
         assertEquals(emptyList<PinnedSession>(), PinnedSessionCodec.decode(null))
         assertEquals(emptyList<PinnedSession>(), PinnedSessionCodec.decode(""))
