@@ -39,6 +39,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.onLongClick as semanticLongClick
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.unit.dp
 import com.voyagerfiles.R
 import com.voyagerfiles.data.model.FileItem
@@ -59,7 +63,7 @@ fun FileListItem(
     trailingContent: (@Composable () -> Unit)? = null,
     isHighlighted: Boolean = false,
     remoteImages: RemoteImageThumbnailLoader? = null,
-    /** Where the file is ("Pictures › Holiday"), shown before its size and date: search results. */
+    /** Where the file is ("Pictures › Holiday"), shown after its date and size: search results. */
     location: String? = null,
 ) {
     val selectionContentDescription = stringResource(
@@ -159,14 +163,22 @@ fun FileListItem(
                         color = MaterialTheme.colorScheme.onSurface,
                     )
                     if (location != null) {
-                        Text(
-                            text = listOfNotNull(location, file.formattedSize.takeIf { !file.isDirectory }, formatDate(file.lastModified))
-                                .joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
+                        // Date and size always fit; the location gives way, from its start.
+                        Row {
+                            Text(
+                                text = listOfNotNull(formatDate(file.lastModified), file.formattedSize.takeIf { !file.isDirectory })
+                                    .joinToString(" · ") + " · ",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                            )
+                            StartTruncatedPath(
+                                path = location,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
                     } else Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
@@ -206,6 +218,30 @@ fun FileListItem(
         }
     }
 }
+
+/**
+ * A "A › B › C" path on one line that, when too long, drops whole folders from its start
+ * ("… › B › C"), so the folder a file is in stays readable. A single folder too long for the line
+ * is cut at its end.
+ */
+@Composable
+private fun StartTruncatedPath(path: String, style: TextStyle, color: Color, modifier: Modifier = Modifier) {
+    val measurer = rememberTextMeasurer()
+    BoxWithConstraints(modifier) {
+        val maxWidth = constraints.maxWidth
+        val shown = remember(path, maxWidth, style) {
+            fun fits(text: String) = measurer.measure(text, style, maxLines = 1, softWrap = false).size.width <= maxWidth
+            val parts = path.split(PATH_SEPARATOR)
+            (0 until parts.size).asSequence()
+                .map { dropped -> if (dropped == 0) path else "…" + PATH_SEPARATOR + parts.drop(dropped).joinToString(PATH_SEPARATOR) }
+                .firstOrNull(::fits)
+                ?: parts.last()
+        }
+        Text(shown, style = style, color = color, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+private const val PATH_SEPARATOR = " › "
 
 private fun formatDate(date: java.util.Date): String =
     DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(date)

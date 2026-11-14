@@ -85,9 +85,11 @@ class StorageSearchScreenTest {
         awaitResults(model)
         val first = root.resolve("one/report.txt").canonicalFile
         val second = root.resolve("two/report.txt").canonicalFile
-        // The folder each result is in, from the volume down, then its size and date.
-        compose.onNodeWithText("one · 5 B ·", substring = true).assertIsDisplayed()
-        compose.onNodeWithText("two · 6 B ·", substring = true).assertIsDisplayed()
+        // Date and size, then the folder each result is in, from the volume down.
+        compose.onNodeWithText(" · 5 B · ", substring = true).assertIsDisplayed()
+        compose.onNodeWithText(" · 6 B · ", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("one").assertIsDisplayed()
+        compose.onNodeWithText("two").assertIsDisplayed()
         // A volume that isn't mounted is named in the footer.
         compose.onNodeWithText("Removed card is not available and was not searched.").assertIsDisplayed()
         compose.onNodeWithContentDescription("Open folder for ${first.path}").assertIsDisplayed()
