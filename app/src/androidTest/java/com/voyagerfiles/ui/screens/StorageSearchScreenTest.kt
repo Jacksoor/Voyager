@@ -85,13 +85,31 @@ class StorageSearchScreenTest {
         awaitResults(model)
         val first = root.resolve("one/report.txt").canonicalFile
         val second = root.resolve("two/report.txt").canonicalFile
-        // The folder each result is in, from the volume down.
-        compose.onNodeWithText("one").assertIsDisplayed()
-        compose.onNodeWithText("two").assertIsDisplayed()
+        // The folder each result is in, from the volume down, then its size and date.
+        compose.onNodeWithText("one · 5 B ·", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("two · 6 B ·", substring = true).assertIsDisplayed()
+        // A volume that isn't mounted is named in the footer.
+        compose.onNodeWithText("Removed card is not available and was not searched.").assertIsDisplayed()
         compose.onNodeWithContentDescription("Open folder for ${first.path}").assertIsDisplayed()
         compose.onNodeWithContentDescription("Open folder for ${second.path}").performClick()
         compose.waitUntil(5_000) { opened != null }
         assertEquals(second.parent, opened)
+    }
+
+    @Test
+    fun searchAgainFindsFilesAddedSinceAndKeepsTheUnindexedSearch() {
+        val model = searchModel()
+        showSearch(model) {}
+        type("report")
+        awaitResults(model)
+        compose.onNodeWithTag(STORAGE_SEARCH_RESULTS_TAG).performScrollToNode(hasTestTag(STORAGE_SEARCH_UNINDEXED_TAG))
+        compose.onNodeWithTag(STORAGE_SEARCH_UNINDEXED_TAG).performClick()
+        compose.waitUntil(10_000) { model.state.value.searchedUnindexed && model.state.value.phase == SearchPhase.DONE }
+        root.resolve("one/report-new.txt").writeText("new")
+        compose.onNodeWithContentDescription("More").performClick()
+        compose.onNodeWithText("Search again").performClick()
+        compose.waitUntil(10_000) { model.state.value.results.size == 3 && model.state.value.phase == SearchPhase.DONE }
+        assertTrue(model.state.value.searchedUnindexed)
     }
 
     @Test
@@ -285,7 +303,13 @@ class StorageSearchScreenTest {
         compose.runOnIdle {
             model = StorageSearchViewModel(application,
                 index = index,
-                volumeProvider = { reads.incrementAndGet(); listOf(StorageVolumeInfo("Test storage", root.canonicalPath, true, false, "mounted")) },
+                volumeProvider = {
+                    reads.incrementAndGet()
+                    listOf(
+                        StorageVolumeInfo("Test storage", root.canonicalPath, true, false, "mounted"),
+                        StorageVolumeInfo("Removed card", null, false, true, "removed"),
+                    )
+                },
                 permissionGranted = { true },
                 preferences = null,
                 repairScanner = {},
