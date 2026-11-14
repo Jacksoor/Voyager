@@ -22,9 +22,12 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import com.voyagerfiles.testing.ViewModelCleanupRule
+import org.junit.Rule
 
 @RunWith(AndroidJUnit4::class)
 class ArchiveOperationsTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     private lateinit var root: File
 
@@ -47,7 +50,7 @@ class ArchiveOperationsTest {
     fun createsAndExtractsZipThroughViewModel() = runBlocking {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = withContext(Dispatchers.Main) {
-            FileBrowserViewModel(application).also { it.openLocalRoot(root.absolutePath) }
+            viewModelCleanup.track(FileBrowserViewModel(application)).also { it.openLocalRoot(root.absolutePath) }
         }
         waitUntil("open test root", viewModel) {
             viewModel.browseState.value.currentPath == root.absolutePath &&
@@ -93,7 +96,7 @@ class ArchiveOperationsTest {
         }
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = withContext(Dispatchers.Main) {
-            FileBrowserViewModel(application).also { it.openLocalRoot(root.absolutePath) }
+            viewModelCleanup.track(FileBrowserViewModel(application)).also { it.openLocalRoot(root.absolutePath) }
         }
         waitUntil("open test root", viewModel) {
             viewModel.browseState.value.currentPath == root.absolutePath &&
@@ -132,7 +135,7 @@ class ArchiveOperationsTest {
         )
         val application = ApplicationProvider.getApplicationContext<Application>()
         val viewModel = withContext(Dispatchers.Main) {
-            FileBrowserViewModel(application).also { it.openLocalRoot(root.absolutePath) }
+            viewModelCleanup.track(FileBrowserViewModel(application)).also { it.openLocalRoot(root.absolutePath) }
         }
         waitUntil("open test root", viewModel) {
             viewModel.browseState.value.currentPath == root.absolutePath && !viewModel.browseState.value.isLoading

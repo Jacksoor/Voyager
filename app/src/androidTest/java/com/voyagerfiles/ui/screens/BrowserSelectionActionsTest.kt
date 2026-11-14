@@ -45,9 +45,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 @OptIn(ExperimentalTestApi::class)
 class BrowserSelectionActionsTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule(effectContext = StandardTestDispatcher())
@@ -206,7 +208,7 @@ class BrowserSelectionActionsTest {
             .assertIsDisplayed()
 
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val restoredViewModel = FileBrowserViewModel(application)
+        val restoredViewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             restoredViewModel.browseState.value.viewMode == ViewMode.COMPACT
         }
@@ -331,7 +333,7 @@ class BrowserSelectionActionsTest {
         colorScheme: ColorScheme? = null,
     ): FileBrowserViewModel {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {
             val browserContent: @Composable () -> Unit = {
                 if (hapticFeedback == null) {

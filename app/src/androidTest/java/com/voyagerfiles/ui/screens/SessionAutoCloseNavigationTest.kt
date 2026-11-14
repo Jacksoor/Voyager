@@ -26,8 +26,10 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class SessionAutoCloseNavigationTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule()
@@ -67,7 +69,7 @@ class SessionAutoCloseNavigationTest {
 
     @Test
     fun automaticClosureReturnsAnOpenBrowserToHome() {
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {
             MaterialTheme {
                 AppNavigation(
@@ -105,7 +107,7 @@ class SessionAutoCloseNavigationTest {
 
     @Test
     fun sharedDuplicateOperationDrainsDeferredSessionsAndReturnsHome() {
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         val operations = (application as VoyagerApp).transfers
         val release = CompletableDeferred<Unit>()
         composeTestRule.setContent {
@@ -147,7 +149,7 @@ class SessionAutoCloseNavigationTest {
 
     @Test
     fun sessionCreatedByReturningPickerResultRemainsOpen() {
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {
             MaterialTheme {
                 AppNavigation(

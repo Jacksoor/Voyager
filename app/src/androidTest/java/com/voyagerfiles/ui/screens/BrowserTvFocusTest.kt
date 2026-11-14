@@ -16,8 +16,10 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class BrowserTvFocusTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -59,7 +61,7 @@ class BrowserTvFocusTest {
 
     private fun launchBrowser(viewMode: ViewMode): FileBrowserViewModel {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {
             MaterialTheme {
                 BrowserScreen(

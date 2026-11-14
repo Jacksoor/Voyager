@@ -15,8 +15,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class SessionAutoCloseTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule()
@@ -51,7 +53,7 @@ class SessionAutoCloseTest {
     @Test
     fun expiredBackgroundIntervalClosesSessionsAndProviderBackedState() {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {}
         composeTestRule.runOnIdle {
             viewModel.openLocalRoot(root.absolutePath)
@@ -92,7 +94,7 @@ class SessionAutoCloseTest {
     @Test
     fun expiredIntervalWaitsForAnActiveOperationToFinish() {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {}
         composeTestRule.runOnIdle {
             viewModel.openLocalRoot(root.absolutePath)

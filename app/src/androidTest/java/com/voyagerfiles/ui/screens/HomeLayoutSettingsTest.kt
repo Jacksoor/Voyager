@@ -20,8 +20,10 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class HomeLayoutSettingsTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule()
@@ -43,7 +45,7 @@ class HomeLayoutSettingsTest {
 
     @Test
     fun editorPersistsVisibilityAndOrderingChanges() {
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {
             MaterialTheme {
                 SettingsScreen(
@@ -79,7 +81,7 @@ class HomeLayoutSettingsTest {
             order.indexOf(HomeSection.FOLDERS) < order.indexOf(HomeSection.BOOKMARKS)
         }
 
-        val restoredViewModel = FileBrowserViewModel(application)
+        val restoredViewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             val restored = restoredViewModel.homeLayout.value ?: return@waitUntil false
             HomeSection.QUICK_ACCESS in restored.hiddenSections &&

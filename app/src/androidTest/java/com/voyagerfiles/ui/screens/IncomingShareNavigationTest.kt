@@ -22,13 +22,15 @@ import java.util.UUID
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class IncomingShareNavigationTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule val compose = createComposeRule()
 
     @Test fun homeRequiresChoosingFolderAndCancelClearsShare() {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val browser = FileBrowserViewModel(application)
+        val browser = viewModelCleanup.track(FileBrowserViewModel(application))
         var files by mutableStateOf(listOf(Uri.parse("content://com.voyagerfiles.test.upload/document/zero")))
         compose.setContent {
             VoyagerTheme {
@@ -43,7 +45,7 @@ class IncomingShareNavigationTest {
     @Test fun sharedFilesSaveThroughExistingUploadPipeline() {
         val application = ApplicationProvider.getApplicationContext<Application>()
         val fixture = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "voyager-share-${UUID.randomUUID()}").apply { mkdirs() }
-        val browser = FileBrowserViewModel(application)
+        val browser = viewModelCleanup.track(FileBrowserViewModel(application))
         val intent = Intent(Intent.ACTION_SEND_MULTIPLE).putParcelableArrayListExtra(
             Intent.EXTRA_STREAM,
             arrayListOf(

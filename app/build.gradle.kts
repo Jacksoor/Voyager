@@ -92,6 +92,10 @@ android {
         buildConfig = true
     }
 
+    testOptions {
+        animationsDisabled = true
+    }
+
     lint {
         checkTestSources = false
     }

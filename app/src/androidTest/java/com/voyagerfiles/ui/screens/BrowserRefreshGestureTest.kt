@@ -28,8 +28,10 @@ import org.junit.After
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class BrowserRefreshGestureTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule val compose = createComposeRule()
     private val app = ApplicationProvider.getApplicationContext<Application>()
     private val root = File(app.cacheDir, "refresh-${UUID.randomUUID()}").apply { mkdirs() }
@@ -44,7 +46,7 @@ class BrowserRefreshGestureTest {
     @Test fun gridPullRefreshesAndPreservesExistingSelection() = verifyRefresh(ViewMode.GRID)
 
     @Test fun emptyFolderCanBePulledToRefresh() {
-        viewModel = FileBrowserViewModel(app)
+        viewModel = viewModelCleanup.track(FileBrowserViewModel(app))
         showBrowser()
         compose.runOnIdle { viewModel.openLocalRoot(root.path) }
         compose.waitUntil(5_000) {
@@ -58,7 +60,7 @@ class BrowserRefreshGestureTest {
 
     @Test fun failedListingCanBePulledToRetry() {
         val provider = ControlledProvider("recovered.txt").apply { failure = true }
-        viewModel = FileBrowserViewModel(app, remoteProviderFactory = RemoteFileProviderFactory { _, _ -> provider })
+        viewModel = viewModelCleanup.track(FileBrowserViewModel(app, remoteProviderFactory = RemoteFileProviderFactory { _, _ -> provider }))
         showBrowser()
         compose.runOnIdle { viewModel.connectToRemote(connection(1)) }
         compose.waitUntil(5_000) { viewModel.browseState.value.error != null }
@@ -73,9 +75,9 @@ class BrowserRefreshGestureTest {
     @Test fun switchingSessionsDuringRefreshHidesPreviousServersRows() {
         val first = ControlledProvider("first.txt")
         val second = ControlledProvider("second.txt")
-        viewModel = FileBrowserViewModel(app, remoteProviderFactory = RemoteFileProviderFactory { _, connection ->
+        viewModel = viewModelCleanup.track(FileBrowserViewModel(app, remoteProviderFactory = RemoteFileProviderFactory { _, connection ->
             if (connection.id == 1L) first else second
-        })
+        }))
         showBrowser()
         compose.runOnIdle { viewModel.connectToRemote(connection(1)) }
         compose.waitUntil(5_000) { viewModel.browseState.value.files.any { it.name == "first.txt" } }
@@ -128,7 +130,7 @@ class BrowserRefreshGestureTest {
 
     private fun verifyRefresh(mode: ViewMode) {
         val selected = root.resolve("keep.txt").apply { writeText("keep") }
-        viewModel = FileBrowserViewModel(app)
+        viewModel = viewModelCleanup.track(FileBrowserViewModel(app))
         compose.setContent {
             MaterialTheme { BrowserScreen(viewModel, onNavigateBack = {}, isTelevision = false) }
         }

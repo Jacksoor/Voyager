@@ -20,14 +20,17 @@ import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Assume.assumeTrue
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
+import org.junit.Rule
 
 class StorageCategoryIndexAndroidTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @Test fun liveMountedStorageScanAndViewModelHandleRemovalAndAccessLoss() = runBlocking {
         assumeTrue("Live all-files access case requires Android 11 or later", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         assumeTrue("Run with MANAGE_EXTERNAL_STORAGE allowed", Environment.isExternalStorageManager())
         val application = ApplicationProvider.getApplicationContext<Application>()
         val folder = File(Environment.getExternalStorageDirectory(), "VoyagerCategoryTest-${System.nanoTime()}")
-        val viewModel = StorageCategoryViewModel(application)
+        val viewModel = viewModelCleanup.track(StorageCategoryViewModel(application))
         assertTrue(folder.mkdirs())
         try {
             val source = File(folder, "unique-category-fixture.jpg").apply { writeText("fixture") }

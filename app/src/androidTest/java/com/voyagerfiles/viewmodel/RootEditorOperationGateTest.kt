@@ -20,8 +20,10 @@ import kotlinx.coroutines.withContext
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class RootEditorOperationGateTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule val compose = createComposeRule()
     private val app = ApplicationProvider.getApplicationContext<Application>()
 
@@ -42,10 +44,10 @@ class RootEditorOperationGateTest {
             }
         }
         val operations = TransferOperationController(startForeground = {})
-        val model = FileBrowserViewModel(app,
+        val model = viewModelCleanup.track(FileBrowserViewModel(app,
             remoteProviderFactory = RemoteFileProviderFactory { _, _ -> remote },
             rootProviderFactory = ::rootProvider,
-            operationController = operations)
+            operationController = operations))
         try {
             openRootFolder(model, directory)
             compose.runOnIdle {
@@ -86,7 +88,7 @@ class RootEditorOperationGateTest {
         val source = File(directory, "source.txt").apply { writeText("original bytes") }
         var allowStart = false
         val operations = TransferOperationController(startForeground = { check(allowStart) { "Foreground start failed" } })
-        val model = FileBrowserViewModel(app, rootProviderFactory = ::rootProvider, operationController = operations)
+        val model = viewModelCleanup.track(FileBrowserViewModel(app, rootProviderFactory = ::rootProvider, operationController = operations))
         try {
             openRootFolder(model, directory)
             openEditor(model, source)

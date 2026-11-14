@@ -19,8 +19,10 @@ import org.junit.After
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class BrowserDragSelectionTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule val compose = createComposeRule()
     private val app = ApplicationProvider.getApplicationContext<Application>()
     private val root = File(app.cacheDir, "drag-${UUID.randomUUID()}").apply { mkdirs() }
@@ -101,7 +103,7 @@ class BrowserDragSelectionTest {
 
     private fun show(mode: ViewMode, count: Int = 8) {
         repeat(count) { index -> root.resolve("${index.toString().padStart(2, '0')}-${if (index % 2 == 0) "keep" else "other"}.txt").writeText("fixture") }
-        vm = FileBrowserViewModel(app)
+        vm = viewModelCleanup.track(FileBrowserViewModel(app))
         compose.setContent { MaterialTheme { BrowserScreen(vm, onNavigateBack = {}, isTelevision = false) } }
         compose.runOnIdle { vm.setViewMode(mode); vm.openLocalRoot(root.path) }
         compose.waitUntil(10_000) { vm.browseState.value.files.size == count && !vm.browseState.value.isLoading }

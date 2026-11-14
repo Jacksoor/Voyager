@@ -23,17 +23,19 @@ import org.junit.Rule
 import org.junit.Test
 import java.io.File
 import java.util.UUID
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class RootAccessUiTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule val compose = createComposeRule()
 
     @Test fun rootRequiresConfirmationAndDenialDoesNotAffectLocalBrowsing() {
         val app = ApplicationProvider.getApplicationContext<Application>()
         var rootRequests = 0
-        val model = FileBrowserViewModel(app, rootProviderFactory = {
+        val model = viewModelCleanup.track(FileBrowserViewModel(app, rootProviderFactory = {
             rootRequests++
             RootFileProvider(RootShell(startProcess = { ProcessBuilder("sh", "-c", "echo 'Root access denied' >&2; exit 1").start() }))
-        })
+        }))
         compose.setContent { AppNavigation(model, hasAllFilesAccess = true, onRequestAllFilesAccess = {}) }
         compose.onNodeWithContentDescription(app.getString(R.string.content_desc_settings)).performClick()
         compose.onNodeWithText(app.getString(R.string.root_open)).performScrollTo().performClick()
@@ -56,9 +58,9 @@ class RootAccessUiTest {
         val app = ApplicationProvider.getApplicationContext<Application>()
         val directory = File(app.cacheDir, "root-editor-${UUID.randomUUID()}").apply { mkdir() }
         val file = File(directory, "config.txt").apply { writeText("original") }
-        val model = FileBrowserViewModel(app, rootProviderFactory = {
+        val model = viewModelCleanup.track(FileBrowserViewModel(app, rootProviderFactory = {
             RootFileProvider(RootShell(startProcess = { ProcessBuilder("sh", "-c", it).start() }, requireRoot = false))
-        })
+        }))
         compose.setContent { BrowserScreen(model, onNavigateBack = {}) }
         try {
             compose.runOnIdle { model.openRootSession() }

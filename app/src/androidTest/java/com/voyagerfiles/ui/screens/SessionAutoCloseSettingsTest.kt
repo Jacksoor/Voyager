@@ -19,8 +19,10 @@ import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class SessionAutoCloseSettingsTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule()
@@ -48,7 +50,7 @@ class SessionAutoCloseSettingsTest {
 
     @Test
     fun settingEnablesAutoCloseAndPersistsSelectedTimeout() {
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {
             MaterialTheme {
                 SettingsScreen(
@@ -81,7 +83,7 @@ class SessionAutoCloseSettingsTest {
             viewModel.sessionAutoCloseTimeout.value == SessionAutoCloseTimeout.FIVE_MINUTES
         }
 
-        val restoredViewModel = FileBrowserViewModel(application)
+        val restoredViewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             restoredViewModel.autoCloseSessions.value &&
                 restoredViewModel.sessionAutoCloseTimeout.value == SessionAutoCloseTimeout.FIVE_MINUTES

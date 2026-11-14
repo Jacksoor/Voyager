@@ -34,8 +34,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class WebDavPlaybackFlowTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -200,14 +202,14 @@ class WebDavPlaybackFlowTest {
         playbackReady: CompletableDeferred<Unit>? = null,
     ): FileBrowserViewModel {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = FileBrowserViewModel(
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(
             application = application,
             remoteProviderFactory = RemoteFileProviderFactory { _, _ -> provider },
             playbackPreparer = WebDavPlaybackPreparer { _, _, _ ->
                 playbackReady?.await()
                 playbackResult.map { PreparedWebDavPlayback(it) {} }
             },
-        )
+        ))
         composeTestRule.setContent {
             MaterialTheme {
                 BrowserScreen(

@@ -8,8 +8,10 @@ import java.util.UUID
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class PasteConflictTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule val compose = createComposeRule()
 
     @Test
@@ -25,7 +27,7 @@ class PasteConflictTest {
         val destination = File(root, "destination").apply { mkdir() }
         val names = listOf("one.txt", "two.txt")
         names.forEach { name -> File(source, name).writeText("new-$name"); File(destination, name).writeText("old-$name") }
-        val viewModel = FileBrowserViewModel(app)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(app))
         compose.setContent {}
         try {
             compose.runOnIdle { viewModel.openLocalRoot(root.path) }

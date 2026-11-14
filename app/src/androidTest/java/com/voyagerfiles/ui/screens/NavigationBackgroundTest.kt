@@ -17,8 +17,10 @@ import kotlin.math.abs
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class NavigationBackgroundTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule()
@@ -26,7 +28,7 @@ class NavigationBackgroundTest {
     @Test
     fun darkNavigationForwardAndBackKeepHostBackgroundDark() {
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.mainClock.autoAdvance = false
         composeTestRule.setContent {
             VoyagerTheme(appTheme = AppTheme.DARK) {

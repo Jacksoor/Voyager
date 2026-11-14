@@ -11,8 +11,10 @@ import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class DocumentUploadTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule()
@@ -43,7 +45,7 @@ class DocumentUploadTest {
             "${application.packageName}.fileprovider",
             source,
         )
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {}
         composeTestRule.runOnIdle { viewModel.openLocalRoot(destination.absolutePath) }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
@@ -70,7 +72,7 @@ class DocumentUploadTest {
             resolve("report.txt").writeText("existing")
         }
         val authority = "${application.packageName}.fileprovider"
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {}
         composeTestRule.runOnIdle { viewModel.openLocalRoot(destination.absolutePath) }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {

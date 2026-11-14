@@ -28,8 +28,10 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class CategoryScreenTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule val compose = createComposeRule()
 
     @Test fun categoryOffersTheBrowserSortFieldsAndDirection() {
@@ -141,7 +143,7 @@ class CategoryScreenTest {
         val previous = runBlocking { preferences.homeLayout.first() }
         try {
             runBlocking { preferences.setHomeLayout(HomeLayout.DEFAULT) }
-            val browser = FileBrowserViewModel(application)
+            val browser = viewModelCleanup.track(FileBrowserViewModel(application))
             compose.setContent {
                 VoyagerTheme {
                     AppNavigation(browser, hasAllFilesAccess = false, onRequestAllFilesAccess = {})

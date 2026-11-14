@@ -17,8 +17,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class CustomHomeLayoutTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
 
     @get:Rule
     val composeTestRule = createComposeRule()
@@ -47,7 +49,7 @@ class CustomHomeLayoutTest {
 
     @Test
     fun homeUsesPersistedSectionVisibilityAndOrder() {
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         composeTestRule.setContent {
             MaterialTheme {
                 HomeScreen(

@@ -23,8 +23,10 @@ import okio.Buffer
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
+import com.voyagerfiles.testing.ViewModelCleanupRule
 
 class RemoteImageBrowserTest {
+    @get:Rule val viewModelCleanup = ViewModelCleanupRule()
     @get:Rule
     val compose = createComposeRule()
 
@@ -53,7 +55,7 @@ class RemoteImageBrowserTest {
             start()
         }
         val application = ApplicationProvider.getApplicationContext<Application>()
-        val viewModel = FileBrowserViewModel(application)
+        val viewModel = viewModelCleanup.track(FileBrowserViewModel(application))
         var originalMode: ViewMode? = null
         try {
             compose.setContent { MaterialTheme { BrowserScreen(viewModel, {}, isTelevision = false) } }
