@@ -86,33 +86,33 @@ class BrowserSessionConnectionTest {
         compose.waitUntil(10_000) { viewModel.activeSession.value?.connected == true }
     }
 
-    @Test fun aServerCanHaveAPinnedTabAndAnotherTabAboveIt() {
+    @Test fun aServerHasOneTabWhichPinsAtItsRoot() {
         compose.setContent {
             MaterialTheme { BrowserScreen(viewModel = viewModel, onNavigateBack = {}, isTelevision = false, hasAllFilesAccess = true) }
         }
         val nas = RemoteConnection(id = 42, name = "NAS", protocol = ConnectionProtocol.FTP, host = "nas.test", port = 21)
         compose.runOnIdle { viewModel.connectToRemote(nas) }
         compose.waitUntil(10_000) { viewModel.activeSession.value?.connected == true }
-        val pinId = viewModel.activeSession.value!!.id
+        val tabId = viewModel.activeSession.value!!.id
         compose.runOnIdle { viewModel.navigateTo("/music") }
         compose.waitUntil(10_000) { viewModel.browseState.value.currentPath == "/music" }
-        compose.runOnIdle { viewModel.setSessionPinned(pinId, true) }
+        compose.runOnIdle { viewModel.setSessionPinned(tabId, true) }
         compose.waitUntil(10_000) { viewModel.sessions.value.single().pinned }
 
-        // "/" is above the pinned "/music": it opens in a second tab of the same server.
+        // Pinned at the server's root, the tab still reaches every folder, and stays where it was.
+        val pin = viewModel.sessions.value.single()
+        assertEquals("/", pin.startPath)
+        assertEquals("/music", pin.currentPath)
         compose.runOnIdle { viewModel.navigateTo("/") }
-        compose.waitUntil(10_000) { viewModel.activeSession.value?.id != pinId && viewModel.browseState.value.currentPath == "/" }
-        assertEquals(listOf(42L, 42L), viewModel.sessions.value.map { it.connectionId })
-        assertEquals("/music", viewModel.sessions.value.single { it.id == pinId }.currentPath)
+        compose.waitUntil(10_000) { viewModel.browseState.value.currentPath == "/" }
+        assertEquals(tabId, viewModel.activeSession.value?.id)
 
-        // Connecting again switches to the unpinned tab instead of opening a third.
-        val otherId = viewModel.activeSession.value!!.id
-        compose.runOnIdle { viewModel.activateSession(pinId) }
-        compose.waitUntil(10_000) { viewModel.activeSession.value?.id == pinId }
+        // Connecting again or showing another folder of the server uses the same tab.
         compose.runOnIdle { viewModel.connectToRemote(nas) }
-        compose.waitUntil(10_000) { viewModel.activeSession.value?.id == otherId }
-        assertEquals(2, viewModel.sessions.value.size)
-        compose.runOnIdle { viewModel.setSessionPinned(pinId, false) }
+        compose.runOnIdle { viewModel.openRemoteFolder(42, "/music") }
+        compose.waitUntil(10_000) { viewModel.browseState.value.currentPath == "/music" }
+        assertEquals(listOf(tabId), viewModel.sessions.value.map { it.id })
+        compose.runOnIdle { viewModel.setSessionPinned(tabId, false) }
     }
 
     /** Saves pins as if left by the last run, starts a new view model and runs [check] with it. */

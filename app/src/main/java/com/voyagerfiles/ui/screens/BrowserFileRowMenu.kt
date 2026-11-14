@@ -105,8 +105,8 @@ data class FileRowMenuModel(val actions: List<FileRowAction>) {
                     add(if (file.name.startsWith('.')) FileRowAction.UNHIDE else FileRowAction.HIDE)
                 }
                 if (file.isDirectory && file.source == FileSource.LOCAL) add(FileRowAction.FOLDER_SHORTCUTS)
-                // Device and server folders can open as another tab; SAF, root and Shizuku have one tab each.
-                if (file.isDirectory && (file.source == FileSource.LOCAL || file.source.isNetwork)) {
+                // Device folders can open as another tab; servers, SAF, root and Shizuku have one tab each.
+                if (file.isDirectory && file.source == FileSource.LOCAL) {
                     add(FileRowAction.OPEN_IN_NEW_SESSION)
                 }
                 if (AudioToneInstaller.isSupported(file)) add(FileRowAction.AUDIO_TONES)
