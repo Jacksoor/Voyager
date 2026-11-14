@@ -426,26 +426,35 @@ class FileBrowserViewModel @JvmOverloads constructor(
         }
     }
 
+    /** Connects the Shizuku tab, a pinned one at the folder it was left in, else a new one at Android. */
     fun openShizukuSession(provider: com.voyagerfiles.data.shizuku.ShizukuFileProvider) {
         cancelInitialNavigation()
         viewModelScope.launch {
-            val sessionId = "shizuku:/"
+            val sessionId = addShizukuSession(SHIZUKU_START_PATH, SHIZUKU_START_PATH)
             val previous = sessionProviders.put(sessionId, provider)
             if (previous !== provider) previous?.disconnect()
             refreshConnectionState(sessionId)
-            if (_sessions.value.none { it.id == sessionId }) {
-                _sessions.update { sessions ->
-                    sessions + BrowserSession(
-                        id = sessionId,
-                        originLabel = getApplication<Application>().getString(R.string.shizuku_title),
-                        source = FileSource.SHIZUKU,
-                        rootPath = "/",
-                        currentPath = "/storage/emulated/0/Android",
-                    )
-                }
-            }
             activateSessionInternal(sessionId)
         }
+    }
+
+    /** There is one Shizuku tab; this adds it when missing, without a connection. */
+    private fun addShizukuSession(startPath: String, currentPath: String, pinned: Boolean = false): String {
+        if (_sessions.value.none { it.id == SHIZUKU_SESSION_ID }) {
+            _sessions.update { sessions ->
+                sessions + BrowserSession(
+                    id = SHIZUKU_SESSION_ID,
+                    originLabel = getApplication<Application>().getString(R.string.shizuku_title),
+                    source = FileSource.SHIZUKU,
+                    rootPath = "/",
+                    startPath = startPath,
+                    currentPath = currentPath,
+                    pinned = pinned,
+                    pinOrder = if (pinned) ++pinCounter else 0L,
+                )
+            }
+        }
+        return SHIZUKU_SESSION_ID
     }
 
     fun openRootTextEditor(file: FileItem) {
@@ -1437,7 +1446,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
      */
     fun setStartTab(sessionId: String, start: Boolean) {
         val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return
-        if (start && !session.pinned) return
+        if (start && !session.canBeStartTab) return
         _sessions.update { sessions ->
             sessions.map { it.copy(isStartTab = if (it.id == sessionId) start else it.isStartTab && !start) }
         }
@@ -1464,6 +1473,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
             session.source == FileSource.LOCAL -> PinnedSession.Local(session.startPath, session.currentPath, start)
             session.source == FileSource.SAF ->
                 session.treeUri?.let { PinnedSession.Saf(it, session.startPath, session.currentPath, start) }
+            session.source == FileSource.SHIZUKU -> PinnedSession.Shizuku(session.startPath, session.currentPath, start)
             connectionId != null -> PinnedSession.Remote(connectionId, session.startPath, session.currentPath, start)
             else -> null
         }
@@ -1509,6 +1519,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
                         } else {
                             null
                         }
+                        is PinnedSession.Shizuku -> addShizukuSession(pin.startPath, pin.currentPath, pinned = true)
                     }
                 }.getOrNull()
                 if (!pin.isStart) continue
@@ -2128,3 +2139,6 @@ class FileBrowserViewModel @JvmOverloads constructor(
 enum class ClipboardOperation {
     NONE, COPY, CUT,
 }
+
+private const val SHIZUKU_SESSION_ID = "shizuku:/"
+private const val SHIZUKU_START_PATH = "/storage/emulated/0/Android"

@@ -49,6 +49,11 @@ import com.voyagerfiles.util.FolderShortcuts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import com.voyagerfiles.data.model.FileSource
+import com.voyagerfiles.data.shizuku.ShizukuFileProvider
+import com.voyagerfiles.data.shizuku.ShizukuConnection
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URLEncoder
 
@@ -114,6 +119,28 @@ private fun AppNavigationContent(
     var launchMessage by remember { mutableStateOf<LaunchMessage?>(null) }
     // The jump into the start tab happens without a transition.
     var instantNavigation by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    // A Shizuku tab that isn't connected: connect at once when Shizuku is running and allowed,
+    // else show the dialog that explains it.
+    fun reconnectShizuku() {
+        scope.launch {
+            var provider: ShizukuFileProvider? = null
+            try {
+                provider = ShizukuFileProvider(ShizukuConnection.connect(context))
+                viewModel.openShizukuSession(provider)
+                provider = null
+                if (navController.currentDestination?.route != Screen.Browser.route) {
+                    navController.navigate(Screen.Browser.createRoute(SHIZUKU_FOLDER))
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                showShizuku = true
+            } finally {
+                provider?.close()
+            }
+        }
+    }
     fun showBrowserFromHome() {
         if (navController.currentDestination?.route == Screen.Home.route) {
             navController.navigate(Screen.Browser.createRoute(viewModel.browseState.value.currentPath)) {
@@ -179,8 +206,13 @@ private fun AppNavigationContent(
                         navController.navigate(Screen.Browser.createRoute(path))
                     },
                     onNavigateToSession = { sessionId, path ->
-                        viewModel.activateSession(sessionId)
-                        navController.navigate(Screen.Browser.createRoute(path))
+                        val session = viewModel.sessions.value.firstOrNull { it.id == sessionId }
+                        if (session?.source == FileSource.SHIZUKU && !session.connected) {
+                            reconnectShizuku()
+                        } else {
+                            viewModel.activateSession(sessionId)
+                            navController.navigate(Screen.Browser.createRoute(path))
+                        }
                     },
                     onNavigateToConnections = {
                         navController.navigate(Screen.Connections.route)
@@ -218,6 +250,7 @@ private fun AppNavigationContent(
                     leaveViaSystemBack = true,
                     onOpenRoot = { confirmRoot = true },
                     onOpenShizuku = { showShizuku = true },
+                    onReconnectShizuku = ::reconnectShizuku,
                     onFindDuplicates = { path -> navController.navigate(Screen.Duplicates.createRoute(path)) },
                     hasAllFilesAccess = hasAllFilesAccess,
                     onSearchSharedStorage = { query ->
@@ -330,7 +363,7 @@ private fun AppNavigationContent(
                 viewModel.openShizukuSession(provider)
                 showShizuku = false
                 if (navController.currentDestination?.route != Screen.Browser.route) {
-                    navController.navigate(Screen.Browser.createRoute("/storage/emulated/0/Android"))
+                    navController.navigate(Screen.Browser.createRoute(SHIZUKU_FOLDER))
                 }
             },
         )
@@ -446,3 +479,6 @@ private val BACK_POP_EASING = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 
 /** How long launch waits for the start tab to be decided before showing Home anyway. */
 private const val LAUNCH_DECISION_TIMEOUT_MS = 1_500L
+
+/** Where a new Shizuku tab opens: the app data folders shared storage hides. */
+private const val SHIZUKU_FOLDER = "/storage/emulated/0/Android"

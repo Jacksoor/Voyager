@@ -167,6 +167,15 @@ private val BAR_TOP_INSET = 11.dp
 private val RAIL_GAP = 8.dp
 private val RAIL_PADDING = 8.dp
 
+/**
+ * How opaque a session's icon is: a Shizuku tab that isn't connected is dimmed, because the
+ * outlined Android icon looks the same as the filled one.
+ */
+internal fun sessionIconAlpha(session: BrowserSession): Float =
+    if (session.source == FileSource.SHIZUKU && !session.connected) DISCONNECTED_ICON_ALPHA else 1f
+
+private const val DISCONNECTED_ICON_ALPHA = 0.38f
+
 /** Server and Shizuku sessions show a filled icon while connected and an outlined one while not. */
 internal fun sessionIcon(session: BrowserSession): ImageVector = when (session.source) {
     FileSource.LOCAL -> if (session.removable) Icons.Filled.SdStorage else Icons.Filled.PhoneAndroid
@@ -301,6 +310,7 @@ private fun SessionBarCell(
             Box(modifier = cellModifier) {
                 BarItem(
                     icon = sessionIcon(session),
+                    iconAlpha = sessionIconAlpha(session),
                     label = session.barLabel,
                     selected = session.id == activeSessionId,
                     onClick = { onSelect(session.id) },
@@ -381,7 +391,7 @@ internal fun SessionMenu(
                 },
             )
         }
-        if (session.pinned) {
+        if (session.canBeStartTab) {
             DropdownMenuItem(
                 text = {
                     Text(stringResource(if (session.isStartTab) R.string.action_unset_start_tab else R.string.action_set_start_tab))
@@ -405,7 +415,7 @@ internal fun SessionMenu(
                 },
             )
         }
-        if (session.hasConnection && session.connected) {
+        if (session.canDisconnect) {
             DropdownMenuItem(
                 text = { Text(stringResource(R.string.action_disconnect)) },
                 leadingIcon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
@@ -444,6 +454,7 @@ private fun BarItem(
     /** For a pin deeper inside its folder: the current folder, shown under the pinned name. */
     sublabel: String? = null,
     labelLines: Int = 1,
+    iconAlpha: Float = 1f,
     /**
      * The bottom bar: items are laid out from the top, so icon and name sit at the same height on
      * every tab and a second line hangs below the name (into the gesture-bar area if need be).
@@ -481,7 +492,7 @@ private fun BarItem(
             Icon(
                 icon,
                 contentDescription = null,
-                tint = if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant,
+                tint = (if (selected) colors.onSecondaryContainer else colors.onSurfaceVariant).copy(alpha = iconAlpha),
             )
             if (pinned) {
                 // The start tab's rocket takes the pin's place: it launches with the app.

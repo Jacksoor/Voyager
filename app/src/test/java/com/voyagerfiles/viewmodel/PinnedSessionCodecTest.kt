@@ -15,6 +15,7 @@ class PinnedSessionCodecTest {
                 "content://com.android.externalstorage.documents/tree/1234-ABCD%3AMusic/document/1234-ABCD%3AMusic",
                 "content://com.android.externalstorage.documents/tree/1234-ABCD%3AMusic/document/1234-ABCD%3AMusic",
             ),
+            PinnedSession.Shizuku("/storage/emulated/0/Android", "/storage/emulated/0/Android/data"),
         )
         assertEquals(pins, PinnedSessionCodec.decode(PinnedSessionCodec.encode(pins)))
     }

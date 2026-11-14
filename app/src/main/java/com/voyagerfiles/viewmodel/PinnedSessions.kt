@@ -25,6 +25,13 @@ sealed interface PinnedSession {
         override val isStart: Boolean = false,
     ) : PinnedSession
 
+    /** The Shizuku tab comes back disconnected; opening it connects to Shizuku again. */
+    data class Shizuku(
+        override val startPath: String,
+        override val currentPath: String,
+        override val isStart: Boolean = false,
+    ) : PinnedSession
+
     /** SAF folders come back at their root: a document deeper down has no known parents after a restart. */
     data class Saf(
         val treeUri: String,
@@ -43,6 +50,7 @@ object PinnedSessionCodec {
     private const val LOCAL = "local"
     private const val REMOTE = "remote"
     private const val SAF = "saf"
+    private const val SHIZUKU = "shizuku"
     private const val START = "start"
 
     fun encode(pins: List<PinnedSession>): String = pins.joinToString("\n") { pin ->
@@ -50,6 +58,7 @@ object PinnedSessionCodec {
             is PinnedSession.Local -> listOf(LOCAL, "", pin.startPath, pin.currentPath)
             is PinnedSession.Remote -> listOf(REMOTE, pin.connectionId.toString(), pin.startPath, pin.currentPath)
             is PinnedSession.Saf -> listOf(SAF, pin.treeUri, pin.startPath, pin.currentPath)
+            is PinnedSession.Shizuku -> listOf(SHIZUKU, "", pin.startPath, pin.currentPath)
         } + (if (pin.isStart) START else "")
         fields.joinToString("\t") { URLEncoder.encode(it, "UTF-8") }
     }
@@ -64,6 +73,7 @@ object PinnedSessionCodec {
             LOCAL -> PinnedSession.Local(start, current, isStart)
             REMOTE -> key.toLongOrNull()?.let { PinnedSession.Remote(it, start, current, isStart) }
             SAF -> key.takeIf { it.isNotEmpty() }?.let { PinnedSession.Saf(it, start, current, isStart) }
+            SHIZUKU -> PinnedSession.Shizuku(start, current, isStart)
             else -> null
         }
     }.toList()
