@@ -121,6 +121,47 @@ class BrowserSessionBarTest {
         compose.waitUntil(10_000) { viewModel.browseState.value.currentPath == first.path }
     }
 
+    @Test fun holdingATabAndSlidingOntoAnEntryRunsItOnRelease() {
+        showBrowser()
+        val id = sessionId(first)
+        val tab = compose.onNodeWithTag(sessionBarItemTestTag(id))
+        val tabTopLeft = tab.fetchSemanticsNode().positionOnScreen
+        val pin = application.getString(R.string.action_pin_folder, first.name)
+
+        tab.performTouchInput { down(center) }
+        // Holding still: let the long press fire while the finger stays down.
+        compose.mainClock.advanceTimeBy(android.view.ViewConfiguration.getLongPressTimeout() + 200L)
+        compose.waitForIdle()
+        // The menu opens next to the tab (above it in the bar, beside it in the rail) while the
+        // finger is still down.
+        val entry = compose.onNodeWithText(pin).fetchSemanticsNode()
+        val tabNode = tab.fetchSemanticsNode()
+        val tabRight = tabTopLeft.x + tabNode.size.width
+        assertTrue(
+            "menu next to the tab",
+            entry.positionOnScreen.y + entry.size.height <= tabTopLeft.y || entry.positionOnScreen.x >= tabRight,
+        )
+        val target = entry.positionOnScreen + androidx.compose.ui.geometry.Offset(entry.size.width / 2f, entry.size.height / 2f) - tabTopLeft
+        tab.performTouchInput {
+            moveTo(target)
+            up()
+        }
+
+        compose.waitUntil(5_000) { viewModel.sessions.value.single { it.id == id }.pinned }
+        compose.onAllNodesWithText(pin).assertCountEquals(0)
+    }
+
+    @Test fun lettingGoOfAHeldTabWithoutSlidingKeepsTheMenuForTaps() {
+        showBrowser()
+        val id = sessionId(first)
+        val pin = application.getString(R.string.action_pin_folder, first.name)
+
+        compose.onNodeWithTag(sessionBarItemTestTag(id)).performTouchInput { longClick() }
+        compose.onNodeWithText(pin).assertExists().performClick()
+
+        compose.waitUntil(5_000) { viewModel.sessions.value.single { it.id == id }.pinned }
+    }
+
     @Test fun itemLabelFollowsTheCurrentFolder() {
         showBrowser()
         val id = sessionId(first)
