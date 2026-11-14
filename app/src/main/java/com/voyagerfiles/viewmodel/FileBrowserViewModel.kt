@@ -293,22 +293,25 @@ class FileBrowserViewModel @JvmOverloads constructor(
         }
     }
 
-    /** Shows [path] on a server: a tab of that server already showing it, or a new unpinned one. */
+    /**
+     * Shows [path] on a server in that server's tab. A server has one tab for now: tabs of the same
+     * server don't share a connection, and copying between them would not know they are one place.
+     */
     fun openRemoteFolder(connectionId: Long, path: String) {
         cancelInitialNavigation()
         viewModelScope.launch {
             val normalizedPath = BrowserNavigationBounds.normalizePath(path)
-            val existing = _sessions.value.firstOrNull {
-                it.connectionId == connectionId && BrowserNavigationBounds.normalizePath(it.currentPath) == normalizedPath
-            }
+            val existing = _sessions.value.firstOrNull { it.connectionId == connectionId }
             if (existing != null) {
+                if (BrowserNavigationBounds.normalizePath(existing.currentPath) != normalizedPath) {
+                    updateSession(existing.id) { it.copy(currentPath = normalizedPath) }
+                }
                 activateSessionInternal(existing.id)
                 return@launch
             }
-            val connection = sessionConnections.values.firstOrNull { it.id == connectionId }
-                ?: connectionRepository.connections.first().firstOrNull { it.id == connectionId }
+            val connection = connectionRepository.connections.first().firstOrNull { it.id == connectionId }
                 ?: return@launch
-            activateSessionInternal(addRemoteSession(connection, normalizedPath))
+            activateSessionInternal(addRemoteSession(connection, currentPath = normalizedPath))
         }
     }
 
@@ -1373,9 +1376,8 @@ class FileBrowserViewModel @JvmOverloads constructor(
     fun connectToRemote(connection: RemoteConnection) {
         cancelInitialNavigation()
         viewModelScope.launch {
-            // Reuse an unpinned tab of this server; pinned tabs keep their place and are never re-pointed.
-            val sessionId = _sessions.value.firstOrNull { it.connectionId == connection.id && !it.pinned }?.id
-                ?: addRemoteSession(connection)
+            // A server has one tab: opening it again shows that tab where it was left.
+            val sessionId = addRemoteSession(connection)
             connectionRepository.updateLastConnected(connection.id, System.currentTimeMillis())
             activateSessionInternal(sessionId)
         }
@@ -1391,6 +1393,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
         currentPath: String? = null,
         pinned: Boolean = false,
     ): String {
+        _sessions.value.firstOrNull { it.connectionId == connection.id }?.let { return it.id }
         val sessionId = newSessionId("remote:${connection.id}")
         val startPath = BrowserNavigationBounds.normalizePath(startPath)
         sessionProviders[sessionId] = remoteProviderFactory.create(getApplication(), connection)
@@ -1432,7 +1435,12 @@ class FileBrowserViewModel @JvmOverloads constructor(
             current.copy(
                 pinned = pinned,
                 pinOrder = if (pinned) ++pinCounter else 0L,
-                startPath = if (pinned && current.source != FileSource.SAF) current.currentPath else current.startPath,
+                startPath = when {
+                    !pinned || current.source == FileSource.SAF -> current.startPath
+                    // A server is pinned as a whole: its one tab keeps reaching every folder.
+                    current.connectionId != null -> current.rootPath
+                    else -> current.currentPath
+                },
                 // Only a pin can be the start tab.
                 isStartTab = pinned && current.isStartTab,
             )
@@ -1512,7 +1520,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
                     when (pin) {
                         is PinnedSession.Local -> addLocalSession(pin.startPath, pin.currentPath, pinned = true)
                         is PinnedSession.Remote -> connections.firstOrNull { it.id == pin.connectionId }?.let { connection ->
-                            addRemoteSession(connection, pin.startPath, pin.currentPath, pinned = true)
+                            addRemoteSession(connection, SERVER_ROOT, pin.currentPath, pinned = true)
                         }
                         is PinnedSession.Saf -> if (pin.treeUri in grantedTrees) {
                             addSafSession(Uri.parse(pin.treeUri), pinned = true)
@@ -2142,3 +2150,6 @@ enum class ClipboardOperation {
 
 private const val SHIZUKU_SESSION_ID = "shizuku:/"
 private const val SHIZUKU_START_PATH = "/storage/emulated/0/Android"
+
+/** Server tabs are rooted and pinned at the server's root. */
+private const val SERVER_ROOT = "/"
