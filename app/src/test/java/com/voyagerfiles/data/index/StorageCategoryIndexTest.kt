@@ -69,7 +69,9 @@ class StorageCategoryIndexTest {
         val root = temporary.newFolder("root")
         repeat(600) { write(root, "$it.jpg") }
         var checks = 0
-        val states = index.scan(StorageCategory.IMAGES, listOf(volume(root)), false) { ++checks < 400 }.toList()
+        // The permission is checked per published batch (256 entries), not per entry: revoke it
+        // after the first batch with results.
+        val states = index.scan(StorageCategory.IMAGES, listOf(volume(root)), false) { ++checks < 5 }.toList()
         assertTrue(states.any { it.files.isNotEmpty() })
         assertEquals(CategoryScanStatus.DENIED, states.last().status)
         assertTrue(states.last().files.isEmpty())

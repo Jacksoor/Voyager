@@ -126,7 +126,9 @@ class StorageCategoryIndex(
         }
 
         suspend fun visit(path: Path, depth: Int) {
-            checkAccess()
+            // The permission is checked when progress is published (every 256 entries or 250 ms):
+            // the check is IPC, 0.33 ms on a phone, 10 s for 31k entries if done per entry.
+            currentCoroutineContext().ensureActive()
             visitedSinceUpdate++
             if (visitedSinceUpdate >= 256 || System.nanoTime() - lastUpdate >= 250_000_000L) publish()
             try {
