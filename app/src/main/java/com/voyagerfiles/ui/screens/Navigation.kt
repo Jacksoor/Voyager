@@ -297,7 +297,8 @@ private fun AppNavigationContent(
                     onRequestAllFilesAccess = onRequestAllFilesAccess,
                     onNavigateBack = { navController.popBackStack() },
                     onOpenFolder = { path ->
-                        viewModel.openLocalFolder(path)
+                        // In the search tab, so Back from the folder returns here.
+                        viewModel.openSearchResult(path)
                         navController.navigate(Screen.Browser.createRoute(path))
                     },
                     requestedQuery = storageSearchQuery,

@@ -261,7 +261,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
             val rootPath = browserSessionRootPath
             val active = _activeSession.value
             if (
-                active != null && active.pinned && active.source != FileSource.SAF &&
+                active != null && active.heldAtStart && active.source != FileSource.SAF &&
                 !BrowserNavigationBounds.isPathAtOrInsideRoot(normalizedPath, active.limitPath)
             ) {
                 // A pin keeps meaning its folder: anything above it opens in another tab.
@@ -339,33 +339,59 @@ class FileBrowserViewModel @JvmOverloads constructor(
         }
     }
 
-    /** Adds a local session without showing it. Its limit is the storage volume holding [startPath]. */
-    private suspend fun addLocalSession(startPath: String, currentPath: String, pinned: Boolean = false): String {
+    /**
+     * Shows a folder found by storage search in the search tab, held at that folder so Back from it
+     * returns to the search. There is one search tab: the next result moves it instead of adding tabs.
+     */
+    fun openSearchResult(path: String) {
+        cancelInitialNavigation()
+        viewModelScope.launch {
+            val normalizedPath = BrowserNavigationBounds.normalizePath(path)
+            val searchTab = _sessions.value.firstOrNull { it.fromSearch }
+            activateSessionInternal(addLocalSession(normalizedPath, normalizedPath, fromSearch = true, replacing = searchTab?.id))
+        }
+    }
+
+    /**
+     * Adds a local session without showing it. Its limit is the storage volume holding [startPath].
+     * With [replacing], that session is replaced in place (the search tab moving to another result).
+     */
+    private suspend fun addLocalSession(
+        startPath: String,
+        currentPath: String,
+        pinned: Boolean = false,
+        fromSearch: Boolean = false,
+        replacing: String? = null,
+    ): String {
         val volumes = withContext(Dispatchers.IO) {
             FileUtils.getStorageVolumes(getApplication()).filter { it.path != null }
         }
         val volumeRoot = BrowserNavigationBounds.containingRoot(startPath, volumes.mapNotNull { it.path })
         val volume = volumes.firstOrNull { volumeRoot != null && BrowserNavigationBounds.normalizePath(it.path!!) == volumeRoot }
         val rootPath = volumeRoot ?: startPath
-        val sessionId = newSessionId("local")
-        sessionProviders[sessionId] = FileProviderFactory.createLocal()
+        val sessionId = replacing?.takeIf { id -> _sessions.value.any { it.id == id } } ?: newSessionId("local")
+        if (sessionId == replacing) scrollMemory.forgetSession(sessionId)
+        sessionProviders.getOrPut(sessionId) { FileProviderFactory.createLocal() }
+        val session = BrowserSession(
+            id = sessionId,
+            originLabel = when {
+                volume == null -> titleForLocalPath(startPath)
+                // Shorter than the system's "Internal shared storage"; SD cards keep their own names.
+                volume.isPrimary -> getApplication<Application>().getString(R.string.session_primary_storage)
+                else -> volume.description
+            },
+            source = FileSource.LOCAL,
+            rootPath = rootPath,
+            startPath = startPath,
+            currentPath = currentPath.takeIf { BrowserNavigationBounds.isPathAtOrInsideRoot(it, rootPath) } ?: startPath,
+            removable = volume?.isRemovable == true,
+            pinned = pinned,
+            pinOrder = if (pinned) ++pinCounter else 0L,
+            fromSearch = fromSearch,
+        )
         _sessions.update { sessions ->
-            sessions + BrowserSession(
-                id = sessionId,
-                originLabel = when {
-                    volume == null -> titleForLocalPath(startPath)
-                    // Shorter than the system's "Internal shared storage"; SD cards keep their own names.
-                    volume.isPrimary -> getApplication<Application>().getString(R.string.session_primary_storage)
-                    else -> volume.description
-                },
-                source = FileSource.LOCAL,
-                rootPath = rootPath,
-                startPath = startPath,
-                currentPath = currentPath.takeIf { BrowserNavigationBounds.isPathAtOrInsideRoot(it, rootPath) } ?: startPath,
-                removable = volume?.isRemovable == true,
-                pinned = pinned,
-                pinOrder = if (pinned) ++pinCounter else 0L,
-            )
+            if (sessions.any { it.id == sessionId }) sessions.map { if (it.id == sessionId) session.copy(lastUsed = it.lastUsed) else it }
+            else sessions + session
         }
         return sessionId
     }
@@ -535,7 +561,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
     fun upTarget(): String? {
         val currentPath = BrowserNavigationBounds.normalizePath(_browseState.value.currentPath)
         val parent = fileProvider.getParentPath(currentPath)
-        val startPath = _activeSession.value?.takeIf { it.pinned }?.startPath
+        val startPath = _activeSession.value?.takeIf { it.heldAtStart }?.startPath
         val bound = if (startPath != null && BrowserNavigationBounds.isPathAtOrInsideRoot(currentPath, startPath)) {
             startPath
         } else {
@@ -1445,6 +1471,8 @@ class FileBrowserViewModel @JvmOverloads constructor(
                 },
                 // Only a pin can be the start tab.
                 isStartTab = pinned && current.isStartTab,
+                // A pinned search tab is an ordinary pin; the next search result opens a new search tab.
+                fromSearch = current.fromSearch && !pinned,
             )
         }
         savePins()

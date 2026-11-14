@@ -56,6 +56,15 @@ class BrowserSessionTest {
     }
 
     @Test
+    fun theSearchTabIsHeldAtItsResultLikeAPin() {
+        val search = local("/storage/emulated/0/Pictures/Photos/2024")
+            .copy(startPath = "/storage/emulated/0/Pictures/Photos", fromSearch = true)
+        assertTrue(search.heldAtStart)
+        assertEquals("Photos", search.barLabel)
+        assertEquals("/storage/emulated/0/Pictures/Photos", search.limitPath)
+    }
+
+    @Test
     fun safSessionsKeepTheirName() {
         val saf = BrowserSession(
             "saf:x", "USB drive", FileSource.SAF,

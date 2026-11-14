@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SdStorage
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Cloud
@@ -176,7 +177,11 @@ private const val DISCONNECTED_ICON_ALPHA = 0.38f
 
 /** Server and Shizuku sessions show a filled icon while connected and an outlined one while not. */
 internal fun sessionIcon(session: BrowserSession): ImageVector = when (session.source) {
-    FileSource.LOCAL -> if (session.removable) Icons.Filled.SdStorage else Icons.Filled.PhoneAndroid
+    FileSource.LOCAL -> when {
+        session.fromSearch -> Icons.Filled.Search
+        session.removable -> Icons.Filled.SdStorage
+        else -> Icons.Filled.PhoneAndroid
+    }
     FileSource.SAF -> Icons.Filled.FolderOpen
     FileSource.ROOT -> Icons.Filled.Security
     FileSource.SHIZUKU -> if (session.connected) Icons.Filled.Android else Icons.Outlined.Android
@@ -336,7 +341,7 @@ private fun SessionBarCell(
                         },
                         pinned = session.pinned,
                         startTab = session.isStartTab,
-                        sublabel = if (session.pinned && session.isAwayFromStart) "› ${session.label}" else null,
+                        sublabel = if (session.heldAtStart && session.isAwayFromStart) "› ${session.label}" else null,
                         labelLines = labelLines,
                         compact = labelLines == 1,
                         modifier = Modifier.fillMaxWidth().testTag(sessionBarItemTestTag(session.id)),

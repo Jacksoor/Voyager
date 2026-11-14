@@ -35,7 +35,16 @@ data class BrowserSession(
     val removable: Boolean = false,
     /** The pinned tab the app opens on launch; at most one session has it. */
     val isStartTab: Boolean = false,
+    /**
+     * The search tab: a folder opened from storage search, held at that folder like a pin so Back
+     * from it returns to the search. It isn't kept across restarts; pinning it makes it a pin.
+     */
+    val fromSearch: Boolean = false,
 ) {
+    /** Held at [startPath]: Back stops there and folders above open in another tab. */
+    val heldAtStart: Boolean
+        get() = pinned || fromSearch
+
     /** Servers and Shizuku keep a connection open that can be dropped; root runs `su` per action. */
     val hasConnection: Boolean
         get() = source.isNetwork || source == FileSource.SHIZUKU
@@ -77,11 +86,11 @@ data class BrowserSession(
 
     /** How far up this session may go: the pinned folder for a pin, else the volume or server root. */
     val limitPath: String
-        get() = if (pinned) startPath else rootPath
+        get() = if (heldAtStart) startPath else rootPath
 
     /** The name shown on its tab: a pin keeps its pinned folder's name, other tabs follow the folder. */
     val barLabel: String
-        get() = if (pinned) startLabel else label
+        get() = if (heldAtStart) startLabel else label
 
     /** It has moved away from where it was opened, so it can be sent back there. */
     val isAwayFromStart: Boolean
