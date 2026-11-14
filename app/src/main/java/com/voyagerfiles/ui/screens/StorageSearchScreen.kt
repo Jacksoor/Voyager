@@ -183,6 +183,8 @@ fun StorageSearchScreen(
         onNavigateBack = onNavigateBack,
         onOpenFile = { open(it, containingFolder = false) },
         onOpenLocation = { open(it, containingFolder = true) },
+        // Quick Access opens a listed type: browsing, not typing, so no keyboard.
+        focusOnOpen = requestedType == null,
     )
 }
 
@@ -204,12 +206,13 @@ internal fun StorageSearchContent(
     onNavigateBack: () -> Unit,
     onOpenFile: (FileItem) -> Unit,
     onOpenLocation: (FileItem) -> Unit,
+    focusOnOpen: Boolean = true,
 ) {
     val focus = remember { FocusRequester() }
     // The keyboard comes up once, on the first visit; not again after opening a result.
     var focusedOnce by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) {
-        if (!focusedOnce && state.query.isEmpty()) runCatching { focus.requestFocus() }
+        if (!focusedOnce && focusOnOpen && state.query.isEmpty()) runCatching { focus.requestFocus() }
         focusedOnce = true
     }
     val listState = rememberLazyListState()
