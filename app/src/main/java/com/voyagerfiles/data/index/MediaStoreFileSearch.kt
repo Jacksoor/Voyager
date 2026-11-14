@@ -150,7 +150,10 @@ object SearchTerms {
                 else -> 3
             }
         }
-        return files.sortedWith(compareBy<FileItem> { score(it.name) }.thenByDescending { it.lastModified }.thenBy { it.path })
+        // Each name is scored once; scoring inside the comparator ran the pattern for every comparison.
+        return files.map { it to score(it.name) }
+            .sortedWith(compareBy<Pair<FileItem, Int>> { it.second }.thenByDescending { it.first.lastModified }.thenBy { it.first.path })
+            .map { it.first }
     }
 
     /** Where a word starts inside a name: after a separator, or at a lower-to-upper case change. */

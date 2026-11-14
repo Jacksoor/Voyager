@@ -144,6 +144,8 @@ class StorageSearchViewModelTest {
         withContext(Dispatchers.Main) { model.setQuery("alpha") }
         await(model) { it.phase == SearchPhase.DONE }
         withContext(Dispatchers.Main) { model.setTypeFilter(FileTypeFilter.FOLDERS) }
+        // Filtering runs off the main thread.
+        await(model) { it.shown.size == 1 }
         assertEquals(listOf("alpha-folder"), model.state.value.shown.map { it.name })
         assertEquals(2, model.state.value.results.size)
     }
