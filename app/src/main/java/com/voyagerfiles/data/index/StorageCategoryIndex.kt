@@ -63,48 +63,55 @@ class StorageCategoryIndex(
         require(maxResults > 0 && maxDepth > 0)
     }
 
-    fun scan(
-        category: StorageCategory,
-        volumes: List<StorageVolumeInfo>,
-        showHidden: Boolean,
-        hasPermission: () -> Boolean,
-    ): Flow<CategoryIndexState> = scanMatching(volumes, showHidden, hasPermission, accepts = category.filter::matches)
-
-    /** Every file of [type] (folders for [FileTypeFilter.FOLDERS]); [onVisit] as for [search]. */
+    /** Every file of [type] (folders for [FileTypeFilter.FOLDERS]); the rest as for [search]. */
     fun scanType(
         type: FileTypeFilter,
         volumes: List<StorageVolumeInfo>,
         showHidden: Boolean,
-        onVisit: ((path: String, isDirectory: Boolean) -> Unit)? = null,
+        visitor: WalkVisitor? = null,
+        listHidden: Boolean = showHidden,
         hasPermission: () -> Boolean,
     ): Flow<CategoryIndexState> = scanMatching(
-        volumes, showHidden, hasPermission, includeDirectories = type == FileTypeFilter.FOLDERS, onVisit = onVisit, accepts = type::matches,
+        volumes, showHidden, listHidden, hasPermission, includeDirectories = type == FileTypeFilter.FOLDERS, visitor = visitor,
+        accepts = type::matches,
     )
 
     /**
-     * Files and folders whose name contains every word of [query]. [onVisit] sees every file and
-     * folder the walk reaches, matching or not (to compare the walk with MediaStore).
+     * Files and folders whose name contains every word of [query]. [showHidden] walks into dot
+     * folders; [listHidden] also returns what matches there. [visitor] sees every file and folder
+     * the walk reaches, matching or not, and every one it couldn't read (to compare the walk with
+     * MediaStore).
      */
     fun search(
         query: String,
         volumes: List<StorageVolumeInfo>,
         showHidden: Boolean,
-        onVisit: ((path: String, isDirectory: Boolean) -> Unit)? = null,
+        visitor: WalkVisitor? = null,
+        listHidden: Boolean = showHidden,
         hasPermission: () -> Boolean,
     ): Flow<CategoryIndexState> {
         val terms = SearchTerms.parse(query)
         require(terms.isNotEmpty()) { "Enter a file name to search" }
-        return scanMatching(volumes, showHidden, hasPermission, includeDirectories = true, onVisit = onVisit) {
+        return scanMatching(volumes, showHidden, listHidden, hasPermission, includeDirectories = true, visitor = visitor) {
             SearchTerms.matches(it.name, terms)
         }
+    }
+
+    /** What a walk reached, for comparing it with MediaStore. Paths are real paths. */
+    interface WalkVisitor {
+        fun visited(path: String, isDirectory: Boolean)
+
+        /** A folder (or volume root) that couldn't be read or listed in full. */
+        fun unreadable(path: String)
     }
 
     private fun scanMatching(
         volumes: List<StorageVolumeInfo>,
         showHidden: Boolean,
+        listHidden: Boolean,
         hasPermission: () -> Boolean,
         includeDirectories: Boolean = false,
-        onVisit: ((path: String, isDirectory: Boolean) -> Unit)? = null,
+        visitor: WalkVisitor? = null,
         accepts: (FileItem) -> Boolean,
     ): Flow<CategoryIndexState> = flow {
         val matches = mutableListOf<FileItem>()
@@ -126,7 +133,8 @@ class StorageCategoryIndex(
             lastUpdate = System.nanoTime()
         }
 
-        fun inaccessible() {
+        fun inaccessible(path: Path? = null) {
+            if (path != null) visitor?.unreadable(path.toString())
             coverage[currentVolume] = coverage[currentVolume].let {
                 it.copy(inaccessibleEntries = it.inaccessibleEntries + 1)
             }
@@ -159,10 +167,10 @@ class StorageCategoryIndex(
                 // Folders only: a check per file costs more than the rest of the walk (4 s vs 10 s
                 // for 31k files on a phone), and an unreadable folder is what hides files.
                 if (attributes.isDirectory && !canRead(path)) {
-                    inaccessible()
+                    inaccessible(path)
                     return
                 }
-                if (depth > 0) onVisit?.invoke(path.toString(), attributes.isDirectory)
+                if (depth > 0) visitor?.visited(path.toString(), attributes.isDirectory)
                 val file = FileItem(
                     name = path.fileName?.toString() ?: path.toString(),
                     path = path.toString(),
@@ -171,7 +179,8 @@ class StorageCategoryIndex(
                     lastModified = Date(attributes.lastModifiedTime().toMillis()),
                     isHidden = path.any { it.toString().startsWith('.') },
                 )
-                if ((!attributes.isDirectory || includeDirectories && depth > 0) && accepts(file)) {
+                val listed = listHidden || !file.isHidden
+                if ((!attributes.isDirectory || includeDirectories && depth > 0) && listed && accepts(file)) {
                     if (matches.size == maxResults) throw CategoryResultLimit()
                     matches += file
                 }
@@ -187,11 +196,11 @@ class StorageCategoryIndex(
                     coverage[currentVolume] = coverage[currentVolume].let { it.copy(filesExamined = it.filesExamined + 1) }
                 }
             } catch (_: IOException) {
-                inaccessible()
+                inaccessible(path)
             } catch (_: SecurityException) {
-                inaccessible()
+                inaccessible(path)
             } catch (_: java.nio.file.DirectoryIteratorException) {
-                inaccessible()
+                inaccessible(path)
             }
         }
 
@@ -216,9 +225,9 @@ class StorageCategoryIndex(
                         visit(root, 0)
                     }
                 } catch (_: IOException) {
-                    inaccessible()
+                    inaccessible(java.io.File(checkNotNull(volume.path)).toPath())
                 } catch (_: SecurityException) {
-                    inaccessible()
+                    inaccessible(java.io.File(checkNotNull(volume.path)).toPath())
                 }
                 coverage[index] = coverage[index].let {
                     it.copy(status = if (it.inaccessibleEntries > 0 || it.skippedEntries > 0) CategoryScanStatus.PARTIAL else CategoryScanStatus.COMPLETE)
@@ -244,40 +253,30 @@ class StorageCategoryIndex(
         }
     }.flowOn(Dispatchers.IO)
 
-    /** A result is a snapshot; reject removed, replaced, unreadable or out-of-scope files before opening it. */
-    fun isCurrent(file: FileItem, volumes: List<StorageVolumeInfo>, hasPermission: () -> Boolean): Boolean =
-        check(file, volumes, hasPermission, allowContentChanges = false)
-
     /**
-     * Like [isCurrent], but a file whose size or time differ still counts: for results from
-     * MediaStore, which can lag behind a file's last write.
+     * A result is a snapshot: reject removed, replaced, unreadable or out-of-scope files before
+     * opening it. A file whose size or time differ still counts: MediaStore can lag behind a
+     * file's last write.
      */
-    fun isOpenable(file: FileItem, volumes: List<StorageVolumeInfo>, hasPermission: () -> Boolean): Boolean =
-        check(file, volumes, hasPermission, allowContentChanges = true)
-
-    private fun check(
-        file: FileItem,
-        volumes: List<StorageVolumeInfo>,
-        hasPermission: () -> Boolean,
-        allowContentChanges: Boolean,
-    ): Boolean {
+    fun isOpenable(file: FileItem, volumes: List<StorageVolumeInfo>, hasPermission: () -> Boolean): Boolean {
         if (!hasPermission()) return false
         return try {
             val path = java.io.File(file.path).toPath()
             val resolved = path.toRealPath()
-            if (resolved != path || !canRead(path)) return false
-            val inScope = volumes.any { volume ->
-                volume.isAvailable && runCatching {
-                    resolved.startsWith(java.io.File(checkNotNull(volume.path)).toPath().toRealPath())
-                }.getOrDefault(false)
+            val roots = volumes.filter { it.isAvailable }.mapNotNull { it.path?.trimEnd('/') }
+            // Below a volume's own path (which may itself sit behind a link) no link may lead elsewhere.
+            val own = roots.firstOrNull { file.path == it || file.path.startsWith("$it/") }
+            val inScope = if (own != null) {
+                resolved == java.io.File(own).toPath().toRealPath().resolve(file.path.removePrefix(own).removePrefix("/"))
+            } else {
+                resolved == path && roots.any { root ->
+                    runCatching { resolved.startsWith(java.io.File(root).toPath().toRealPath()) }.getOrDefault(false)
+                }
             }
+            if (!inScope || !canRead(path)) return false
             val attributes = Files.readAttributes(path, BasicFileAttributes::class.java, NOFOLLOW_LINKS)
-            val sameTypeAndSize = if (file.isDirectory) attributes.isDirectory
-                else attributes.isRegularFile && attributes.size() == file.size
-            val unchanged = allowContentChanges || sameTypeAndSize &&
-                attributes.lastModifiedTime().toMillis() == file.lastModified.time
             val sameType = if (file.isDirectory) attributes.isDirectory else attributes.isRegularFile
-            inScope && sameType && unchanged && hasPermission()
+            sameType && hasPermission()
         } catch (_: IOException) {
             false
         } catch (_: SecurityException) {

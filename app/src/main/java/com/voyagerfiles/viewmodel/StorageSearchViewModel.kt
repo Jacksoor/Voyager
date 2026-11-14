@@ -63,14 +63,14 @@ data class StorageSearchState(
     /** Search them every time, not only on request. */
     val searchUnindexed: Boolean = false,
     val repairMediaIndex: Boolean = true,
-    /** Whether an index answers at all (API 30+); without one every search walks. */
+    /** Whether an index answers at all (API 31+); without one every search walks. */
     val hasIndex: Boolean = false,
     /** The walk stopped early: cancelled or too many results. */
     val incomplete: Boolean = false,
     val inaccessibleFolders: Int = 0,
     /** Results that turned out to be gone or changed when opened. */
     val staleEntries: Int = 0,
-    /** Paths sent to the media scanner after the last full walk. */
+    /** MediaStore entries the last full walks fixed (gone rows removed, missing files added). */
     val repairedEntries: Int = 0,
     val volumes: List<StorageVolumeInfo> = emptyList(),
     /** How a type is listed without a query (Quick Access); shared with the old category screen's setting. */
@@ -96,8 +96,10 @@ class StorageSearchViewModel @JvmOverloads constructor(
     application: Application,
     private val savedState: SavedStateHandle = SavedStateHandle(),
     private val walker: StorageCategoryIndex = StorageCategoryIndex(),
+    // Android 12 on: Android 11's MediaStore doesn't follow what an all-files-access app (this
+    // one, any file manager) creates or renames, often for minutes, so it walks as before.
     private val index: IndexedFileSource? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) MediaStoreFileSearch(application) else null,
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaStoreFileSearch(application) else null,
     private val volumeProvider: () -> List<StorageVolumeInfo> = { FileUtils.getStorageVolumes(application) },
     private val permissionGranted: () -> Boolean = {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) Environment.isExternalStorageManager()
@@ -169,6 +171,8 @@ class StorageSearchViewModel @JvmOverloads constructor(
     /** The screen's current access and hidden-files setting; the first call runs a restored query. */
     fun configure(showHidden: Boolean, accessGranted: Boolean) {
         val changed = !configured || showHidden != this.showHidden || accessGranted != this.accessGranted
+        // Walked results were found with the other hidden-files setting: start over.
+        if (configured && showHidden != this.showHidden) shownKey = null
         this.showHidden = showHidden
         this.accessGranted = accessGranted
         configured = true
@@ -182,14 +186,15 @@ class StorageSearchViewModel @JvmOverloads constructor(
         typingJob?.cancel()
         typingJob = viewModelScope.launch {
             delay(TYPING_PAUSE_MS)
-            search(query, walkUnindexed = null)
+            search(query, walkUnindexed = null, typed = true)
         }
     }
 
     /** The keyboard's search key: search now, without waiting for the pause. */
     fun submit() {
         typingJob?.cancel()
-        if (_state.value.query.trim() != _state.value.searchedQuery || _state.value.phase == SearchPhase.IDLE) {
+        val query = _state.value.query.trim()
+        if (query != _state.value.searchedQuery || _state.value.phase == SearchPhase.IDLE || walkWaiting) {
             search(_state.value.query, walkUnindexed = null)
         }
     }
@@ -267,12 +272,25 @@ class StorageSearchViewModel @JvmOverloads constructor(
         viewModelScope.launch { preferences?.setSearchRepairMediaIndex(enabled) }
     }
 
+    /** Set when the screen stops; the next [onReturn] then asks the index again. */
+    private var left = false
+
+    /** A typed search's walk is waiting for the longer pause; the search key starts it at once. */
+    private var walkWaiting = false
+
+    /** The screen went away (a result opened in the browser or another app). */
+    fun onLeave() {
+        left = true
+    }
+
     /**
      * Back from an opened result: the results stay. The index is asked again (it is cheap) so
      * files deleted meanwhile drop out and new ones appear; walked results are kept if they still
      * exist. Nothing is walked again.
      */
     fun onReturn() {
+        if (!left) return
+        left = false
         val query = _state.value.searchedQuery
         val browsed = _state.value.browsedType
         if ((query.isBlank() && browsed == null) || _state.value.busy || !accessGranted || !permissionGranted()) return
@@ -333,8 +351,12 @@ class StorageSearchViewModel @JvmOverloads constructor(
         return current
     }
 
-    /** [walkUnindexed] null: walk the indexed volumes only when the user asked for it every time. */
-    private fun search(rawQuery: String, walkUnindexed: Boolean?) {
+    /**
+     * [walkUnindexed] null: walk the indexed volumes only when the user asked for it every time.
+     * [typed]: started by a pause in typing, so a walk waits for a longer one ([WALK_PAUSE_MS]);
+     * the index answers at once, but a walk restarted with every pause would never finish.
+     */
+    private fun search(rawQuery: String, walkUnindexed: Boolean?, typed: Boolean = false) {
         val query = rawQuery.trim()
         val request = ++generation
         searchJob?.cancel()
@@ -394,6 +416,14 @@ class StorageSearchViewModel @JvmOverloads constructor(
                 }
                 refilterIfStale(results)
                 if (walkVolumes.isEmpty()) return@launch
+                if (typed) {
+                    walkWaiting = true
+                    try {
+                        delay(WALK_PAUSE_MS)
+                    } finally {
+                        walkWaiting = false
+                    }
+                }
                 walk(request, query, browsed, walkVolumes, repair = walkIndexed && _state.value.repairMediaIndex, indexedVolumes)
             } catch (cancelled: CancellationException) {
                 throw cancelled
@@ -415,6 +445,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
     ) {
         val visitedFiles = HashSet<String>()
         val visitedDirs = HashSet<String>()
+        val unreadable = HashSet<String>()
         // The walker reports real paths; MediaStore and the rest of the app use the volume's own
         // (a volume path behind a symlink would otherwise list every result twice).
         val realRoots = volumes.mapNotNull { v ->
@@ -426,14 +457,22 @@ class StorageSearchViewModel @JvmOverloads constructor(
             val (real, own) = realRoots.firstOrNull { (real, _) -> path == real || path.startsWith("$real/") } ?: return path
             return own + path.removePrefix(real)
         }
-        // To compare with MediaStore the walk must see hidden entries too (`.nomedia` files).
+        // To compare with MediaStore the walk must see hidden entries too (`.nomedia` files), but
+        // only lists them when hidden files are shown.
         val walkHidden = showHidden || repair
-        val onVisit: ((String, Boolean) -> Unit)? = if (repair) { path, isDirectory ->
-            if (isDirectory) visitedDirs += volumePath(path) else visitedFiles += volumePath(path)
-        } else null
+        val visitor = if (!repair) null else object : StorageCategoryIndex.WalkVisitor {
+            override fun visited(path: String, isDirectory: Boolean) {
+                if (isDirectory) visitedDirs += volumePath(path) else visitedFiles += volumePath(path)
+            }
+
+            override fun unreadable(path: String) {
+                unreadable += volumePath(path)
+            }
+        }
         var last: com.voyagerfiles.data.index.CategoryIndexState? = null
-        val walk = if (browsed != null) walker.scanType(browsed, volumes, walkHidden, onVisit, permissionGranted)
-            else walker.search(query, volumes, walkHidden, onVisit, permissionGranted)
+        val walk = if (browsed != null) walker.scanType(browsed, volumes, walkHidden, visitor, showHidden, permissionGranted)
+            else walker.search(query, volumes, walkHidden, visitor, showHidden, permissionGranted)
+        var lastCount = -1
         walk.collect { result ->
             if (request != generation) return@collect
             last = result
@@ -441,14 +480,17 @@ class StorageSearchViewModel @JvmOverloads constructor(
                 _state.update { it.copy(phase = SearchPhase.DENIED, results = emptyList(), shown = emptyList()) }
                 return@collect
             }
-            walkedResults = withContext(Dispatchers.Default) {
-                result.files.filter { showHidden || !it.isHidden }.map { it.copy(path = volumePath(it.path)) }
+            val inaccessible = result.coverage.sumOf { c -> c.inaccessibleEntries }
+            // Progress comes every 256 entries; matches only grow, so rank again only when there are new ones.
+            if (result.files.size == lastCount) {
+                _state.update { it.copy(inaccessibleFolders = inaccessible) }
+                return@collect
             }
+            lastCount = result.files.size
+            walkedResults = withContext(Dispatchers.Default) { result.files.map { it.copy(path = volumePath(it.path)) } }
             val results = ranked(query)
             if (request != generation) return@collect
-            _state.update {
-                it.withResults(results).copy(inaccessibleFolders = result.coverage.sumOf { c -> c.inaccessibleEntries })
-            }
+            _state.update { it.withResults(results).copy(inaccessibleFolders = inaccessible) }
         }
         if (request != generation) return
         val status = last?.status
@@ -457,19 +499,32 @@ class StorageSearchViewModel @JvmOverloads constructor(
         val complete = status == CategoryScanStatus.COMPLETE || status == CategoryScanStatus.PARTIAL
         val source = index
         if (repair && complete && source != null && indexedVolumes.isNotEmpty()) {
-            repaired = runCatching {
-                val paths = withContext(Dispatchers.IO) {
-                    MediaStoreRepair.plan(
-                        roots = indexedVolumes.mapNotNull { it.path?.trimEnd('/') },
-                        indexed = source.allPaths(indexedVolumes),
+            repaired = try {
+                withContext(Dispatchers.IO) {
+                    // Only volumes still mounted and listable: on a card taken out every path looks gone.
+                    val mounted = volumeProvider().filter { it.isAvailable }.mapNotNull { it.path?.trimEnd('/') }.toSet()
+                    val roots = indexedVolumes.mapNotNull { it.path?.trimEnd('/') }
+                        .filter { it in mounted && File(it).list() != null }
+                    val before = source.allPaths(indexedVolumes)
+                    val paths = MediaStoreRepair.plan(
+                        roots = roots,
+                        indexed = before,
                         visitedFiles = visitedFiles,
                         visitedDirs = visitedDirs,
+                        unreadable = unreadable,
+                        declined = MediaStoreRepair.declinedSnapshot(),
                         exists = { File(it).exists() },
                     )
+                    if (paths.isEmpty()) return@withContext 0
+                    repairScanner(paths)
+                    // Count what MediaStore now has right, not what was sent.
+                    MediaStoreRepair.settle(paths, before, source.allPaths(indexedVolumes))
                 }
-                repairScanner(paths)
-                paths.size
-            }.getOrDefault(0)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                0
+            }
         }
         // The walk saw every indexed folder: index results for files that are gone go too.
         if (indexedVolumes.isNotEmpty() && volumes.containsAll(indexedVolumes)) {
@@ -506,5 +561,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
         const val QUERY_KEY = "query"
         const val TYPE_KEY = "type"
         const val TYPING_PAUSE_MS = 150L
+        /** A walk starts after this much more typing pause (or at once with the search key). */
+        const val WALK_PAUSE_MS = 600L
     }
 }
