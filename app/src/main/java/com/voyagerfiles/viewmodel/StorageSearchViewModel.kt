@@ -49,8 +49,10 @@ data class StorageSearchState(
     val typeFilter: FileTypeFilter = FileTypeFilter.ALL,
     /** The query [results] belong to. */
     val searchedQuery: String = "",
-    /** Best match first, every type; [shown] applies the type filter. */
+    /** Best match first, every type. */
     val results: List<FileItem> = emptyList(),
+    /** [results] of the chosen type; computed with them, off the main thread. */
+    val shown: List<FileItem> = emptyList(),
     val phase: SearchPhase = SearchPhase.IDLE,
     /** Folders the index leaves out were searched too for [searchedQuery]. */
     val searchedUnindexed: Boolean = false,
@@ -68,7 +70,6 @@ data class StorageSearchState(
     val repairedEntries: Int = 0,
     val volumes: List<StorageVolumeInfo> = emptyList(),
 ) {
-    val shown: List<FileItem> get() = results.filter(typeFilter::matches)
     val busy: Boolean get() = phase == SearchPhase.SEARCHING || phase == SearchPhase.WALKING
 }
 
@@ -146,7 +147,43 @@ class StorageSearchViewModel @JvmOverloads constructor(
 
     fun setTypeFilter(filter: FileTypeFilter) {
         _state.update { it.copy(typeFilter = filter) }
+        refilter()
     }
+
+    private var filterJob: Job? = null
+
+    /** Applies the chosen type to the results, off the main thread (results can be thousands). */
+    private fun refilter() {
+        filterJob?.cancel()
+        filterJob = viewModelScope.launch {
+            val state = _state.value
+            val shown = withContext(Dispatchers.Default) { state.results.filter(state.typeFilter::matches) }
+            _state.update { if (it.results === state.results && it.typeFilter == state.typeFilter) it.copy(shown = shown) else it }
+        }
+    }
+
+    /**
+     * Merges and ranks the current results and applies the type, all off the main thread: ranking
+     * thousands of names while typing would make the keyboard lag.
+     */
+    private suspend fun ranked(query: String): Ranked {
+        val indexed = indexedResults
+        val walked = walkedResults
+        val filter = _state.value.typeFilter
+        return withContext(Dispatchers.Default) {
+            val byPath = LinkedHashMap<String, FileItem>(indexed.size + walked.size)
+            indexed.forEach { byPath[it.path] = it }
+            walked.forEach { byPath.putIfAbsent(it.path, it) }
+            val all = SearchTerms.rank(byPath.values.toList(), query)
+            Ranked(all, all.filter(filter::matches), filter)
+        }
+    }
+
+    private class Ranked(val all: List<FileItem>, val shown: List<FileItem>, val filter: FileTypeFilter)
+
+    /** [state] with new results; refiltered if the type changed while they were computed. */
+    private fun StorageSearchState.withResults(results: Ranked): StorageSearchState =
+        copy(results = results.all, shown = results.shown)
 
     /** Walk the folders the index leaves out, for the shown query. */
     fun searchUnindexedNow() {
@@ -176,13 +213,16 @@ class StorageSearchViewModel @JvmOverloads constructor(
         searchJob = viewModelScope.launch {
             try {
                 val volumes = withContext(Dispatchers.IO) { volumeProvider().filter { it.isAvailable } }
-                val indexedVolumes = coveredVolumes(volumes)
+                val indexedVolumes = withContext(Dispatchers.IO) { coveredVolumes(volumes) }
                 val indexed = withContext(Dispatchers.IO) { index?.search(query, indexedVolumes, showHidden).orEmpty() }
                 val walked = withContext(Dispatchers.IO) { walkedResults.filter { File(it.path).exists() } }
                 if (request != generation) return@launch
                 indexedResults = indexed
                 walkedResults = walked
-                _state.update { it.copy(results = merged(query), volumes = volumes) }
+                val results = ranked(query)
+                if (request != generation) return@launch
+                _state.update { it.withResults(results).copy(volumes = volumes) }
+                refilterIfStale(results)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -202,7 +242,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
     suspend fun validate(file: FileItem): Boolean {
         if (!permissionGranted()) {
             cancel()
-            _state.update { it.copy(phase = SearchPhase.DENIED, results = emptyList()) }
+            _state.update { it.copy(phase = SearchPhase.DENIED, results = emptyList(), shown = emptyList()) }
             return false
         }
         val current = withContext(Dispatchers.IO) {
@@ -211,7 +251,13 @@ class StorageSearchViewModel @JvmOverloads constructor(
         if (!current) {
             indexedResults = indexedResults.filterNot { it.path == file.path }
             walkedResults = walkedResults.filterNot { it.path == file.path }
-            _state.update { it.copy(results = it.results.filterNot { r -> r.path == file.path }, staleEntries = it.staleEntries + 1) }
+            _state.update {
+                it.copy(
+                    results = it.results.filterNot { r -> r.path == file.path },
+                    shown = it.shown.filterNot { r -> r.path == file.path },
+                    staleEntries = it.staleEntries + 1,
+                )
+            }
             // A row for a file that is gone: tell the scanner, so MediaStore forgets it.
             if (_state.value.repairMediaIndex && !withContext(Dispatchers.IO) { File(file.path).exists() }) {
                 viewModelScope.launch { runCatching { repairScanner(listOf(file.path)) } }
@@ -229,14 +275,14 @@ class StorageSearchViewModel @JvmOverloads constructor(
         if (!accessGranted || !permissionGranted()) {
             indexedResults = emptyList()
             walkedResults = emptyList()
-            _state.update { it.copy(searchedQuery = query, results = emptyList(), phase = SearchPhase.DENIED) }
+            _state.update { it.copy(searchedQuery = query, results = emptyList(), shown = emptyList(), phase = SearchPhase.DENIED) }
             return
         }
         if (query.isEmpty()) {
             indexedResults = emptyList()
             walkedResults = emptyList()
             _state.update {
-                it.copy(searchedQuery = "", results = emptyList(), phase = SearchPhase.IDLE, searchedUnindexed = false,
+                it.copy(searchedQuery = "", results = emptyList(), shown = emptyList(), phase = SearchPhase.IDLE, searchedUnindexed = false,
                     incomplete = false, inaccessibleFolders = 0, staleEntries = 0, repairedEntries = 0)
             }
             return
@@ -247,7 +293,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
         searchJob = viewModelScope.launch {
             try {
                 val volumes = withContext(Dispatchers.IO) { volumeProvider().filter { it.isAvailable } }
-                val indexedVolumes = coveredVolumes(volumes)
+                val indexedVolumes = withContext(Dispatchers.IO) { coveredVolumes(volumes) }
                 val otherVolumes = volumes - indexedVolumes.toSet()
                 val indexed = withContext(Dispatchers.IO) { index?.search(query, indexedVolumes, showHidden).orEmpty() }
                 if (request != generation) return@launch
@@ -255,10 +301,11 @@ class StorageSearchViewModel @JvmOverloads constructor(
                 // A new walk of the same query keeps what the last one found until it has more.
                 if (!sameQuery) walkedResults = emptyList()
                 val walkVolumes = otherVolumes + if (walkIndexed) indexedVolumes else emptyList()
+                val results = ranked(query)
+                if (request != generation) return@launch
                 _state.update {
-                    it.copy(
+                    it.withResults(results).copy(
                         searchedQuery = query,
-                        results = merged(query),
                         phase = if (walkVolumes.isEmpty()) SearchPhase.DONE else SearchPhase.WALKING,
                         // Without an index (or on volumes it doesn't cover) the walk covers everything.
                         searchedUnindexed = walkIndexed || indexedVolumes.isEmpty(),
@@ -269,6 +316,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
                         volumes = volumes,
                     )
                 }
+                refilterIfStale(results)
                 if (walkVolumes.isEmpty()) return@launch
                 walk(request, query, walkVolumes, repair = walkIndexed && _state.value.repairMediaIndex, indexedVolumes)
             } catch (cancelled: CancellationException) {
@@ -311,15 +359,16 @@ class StorageSearchViewModel @JvmOverloads constructor(
             if (request != generation) return@collect
             last = result
             if (result.status == CategoryScanStatus.DENIED) {
-                _state.update { it.copy(phase = SearchPhase.DENIED, results = emptyList()) }
+                _state.update { it.copy(phase = SearchPhase.DENIED, results = emptyList(), shown = emptyList()) }
                 return@collect
             }
-            walkedResults = result.files.filter { showHidden || !it.isHidden }.map { it.copy(path = volumePath(it.path)) }
+            walkedResults = withContext(Dispatchers.Default) {
+                result.files.filter { showHidden || !it.isHidden }.map { it.copy(path = volumePath(it.path)) }
+            }
+            val results = ranked(query)
+            if (request != generation) return@collect
             _state.update {
-                it.copy(
-                    results = merged(query),
-                    inaccessibleFolders = result.coverage.sumOf { c -> c.inaccessibleEntries },
-                )
+                it.withResults(results).copy(inaccessibleFolders = result.coverage.sumOf { c -> c.inaccessibleEntries })
             }
         }
         if (request != generation) return
@@ -347,10 +396,10 @@ class StorageSearchViewModel @JvmOverloads constructor(
         if (indexedVolumes.isNotEmpty() && volumes.containsAll(indexedVolumes)) {
             indexedResults = withContext(Dispatchers.IO) { indexedResults.filter { File(it.path).exists() } }
         }
+        val results = ranked(query)
         if (request != generation) return
         _state.update {
-            it.copy(
-                results = merged(query),
+            it.withResults(results).copy(
                 phase = SearchPhase.DONE,
                 incomplete = status == CategoryScanStatus.LIMITED,
                 repairedEntries = it.repairedEntries + repaired,
@@ -361,11 +410,9 @@ class StorageSearchViewModel @JvmOverloads constructor(
     private fun coveredVolumes(volumes: List<StorageVolumeInfo>): List<StorageVolumeInfo> =
         index?.let { source -> volumes.filter { runCatching { source.covers(it) }.getOrDefault(false) } }.orEmpty()
 
-    private fun merged(query: String): List<FileItem> {
-        val byPath = LinkedHashMap<String, FileItem>()
-        indexedResults.forEach { byPath[it.path] = it }
-        walkedResults.forEach { byPath.putIfAbsent(it.path, it) }
-        return SearchTerms.rank(byPath.values.toList(), query)
+    /** The type changed while [results] were computed for the old one. */
+    private fun refilterIfStale(results: Ranked) {
+        if (_state.value.typeFilter != results.filter) refilter()
     }
 
     private companion object {
