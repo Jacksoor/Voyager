@@ -2,6 +2,7 @@ package com.voyagerfiles.ui.screens
 
 import android.os.Build
 import android.os.Environment
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasAnyAncestor
@@ -50,7 +51,7 @@ class StorageSearchNavigationTest {
             compose.onNodeWithText("Search shared storage").performClick()
             compose.onNodeWithTag("storage-search-query").assertIsDisplayed()
             compose.waitUntil(45_000) { compose.onAllNodesWithText("2 results").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithText("Results for $needle").assertIsDisplayed()
+            compose.onNodeWithTag("storage-search-query").assert(hasText(needle))
         } finally {
             fixture.deleteRecursively()
         }
@@ -88,6 +89,9 @@ class StorageSearchNavigationTest {
             }
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithTag("storage-search-query").assertIsDisplayed()
+            // Back from the browser, the results are still there; nothing starts over.
+            compose.onNodeWithText("2 results").assertIsDisplayed()
+            compose.onNodeWithContentDescription("Open folder for $chosenPath").assertIsDisplayed()
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithContentDescription("Search shared storage").assertIsDisplayed()
             assertEquals("first", first.readText())

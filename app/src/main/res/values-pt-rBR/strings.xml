@@ -537,7 +537,6 @@
     <string name="search_storage_scope">Files across accessible mounted shared storage.</string>
     <string name="search_file_name">File name</string>
     <string name="search_ready">Enter a file name and choose Search.</string>
-    <string name="search_results_for">Results for %1$s</string>
     <string name="search_permission_required">Full storage access is required to search shared storage.</string>
     <string name="search_stale_file">This file changed or is no longer accessible. Search again.</string>
     <string name="search_no_matches">No matching files</string>
@@ -551,9 +550,6 @@
     <string name="share_choose_destination">Choose a folder for shared files (%1$d)</string>
     <string name="share_save_here">Save here</string>
     <string name="share_receive_failed">Could not receive shared files. Share files with read access and try again.</string>
-    <string name="search_storage_items_scope">Files and folders across accessible mounted shared storage.</string>
-    <string name="search_item_name">File or folder name</string>
-    <string name="search_items_ready">Enter a file or folder name and choose Search.</string>
     <string name="search_stale_item">This item changed or is no longer accessible. Search again.</string>
     <string name="search_no_matching_items">No matching files or folders</string>
 </resources>

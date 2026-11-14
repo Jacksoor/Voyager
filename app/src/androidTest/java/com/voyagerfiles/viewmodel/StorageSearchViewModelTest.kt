@@ -1,13 +1,18 @@
 package com.voyagerfiles.viewmodel
 
 import android.app.Application
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelStore
 import androidx.test.core.app.ApplicationProvider
-import com.voyagerfiles.data.index.CategoryScanStatus
+import com.voyagerfiles.data.index.IndexedFileSource
+import com.voyagerfiles.data.index.SearchTerms
+import com.voyagerfiles.data.index.StorageCategoryIndex
+import com.voyagerfiles.data.model.FileItem
+import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.util.StorageVolumeInfo
 import java.io.File
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import java.util.Date
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -23,14 +28,36 @@ class StorageSearchViewModelTest {
     private val application = ApplicationProvider.getApplicationContext<Application>()
     private val store = ViewModelStore()
     private lateinit var root: File
+    /** Folders the walker opened; an index-only search opens none. */
+    private val walkedFolders = AtomicInteger()
+    private val scanned = CopyOnWriteArrayList<String>()
+
+    /** Stands in for MediaStore: knows [known] (absolute paths) and covers the test volume. */
+    private inner class FakeIndex(var known: Set<String>, var covers: Boolean = true) : IndexedFileSource {
+        val queries = AtomicInteger()
+        override fun covers(volume: StorageVolumeInfo) = covers
+        override fun search(query: String, volumes: List<StorageVolumeInfo>, showHidden: Boolean): List<FileItem> {
+            queries.incrementAndGet()
+            val terms = SearchTerms.parse(query)
+            return known.map(::File).filter { it.exists() && SearchTerms.matches(it.name, terms) }
+                .map { FileItem(it.name, it.path, it.isDirectory, it.length(), Date(it.lastModified())) }
+        }
+        override fun allPaths(volumes: List<StorageVolumeInfo>) = known
+    }
 
     @Before
     fun setUp() {
-        root = File(application.cacheDir, "storage-search-viewmodel").apply {
+        // Canonical, like MediaStore's paths: opening a result checks it isn't reached through a link.
+        root = File(application.cacheDir.canonicalFile, "storage-search-viewmodel").apply {
             deleteRecursively()
             mkdirs()
             resolve("alpha.txt").writeText("alpha")
             resolve("beta.bin").writeText("beta")
+            resolve("saves").mkdirs()
+            resolve("saves/alpha-save.sav").writeText("written past FUSE")
+            resolve("game").mkdirs()
+            resolve("game/.nomedia").writeText("")
+            resolve("game/alpha-sprite.png").writeText("png")
         }
     }
 
@@ -42,112 +69,127 @@ class StorageSearchViewModelTest {
     }
 
     @Test
-    fun editingAndBlankSubmissionDoNotReadStorage() = runBlocking {
-        val reads = AtomicInteger()
-        val viewModel = model(volumeProvider = { reads.incrementAndGet(); volumes() })
+    fun typingAsksTheIndexAndWalksNothing() = runBlocking {
+        val index = FakeIndex(setOf(path("alpha.txt"), path("beta.bin")))
+        val model = model(index)
+        withContext(Dispatchers.Main) { model.setQuery("alp") }
+        await(model) { it.phase == SearchPhase.DONE && it.searchedQuery == "alp" }
+        assertEquals(listOf("alpha.txt"), model.state.value.results.map { it.name })
+        assertEquals(0, walkedFolders.get())
+        assertFalse(model.state.value.searchedUnindexed)
+    }
+
+    @Test
+    fun unindexedFilesAppearOnRequestAndTheIndexIsRepaired() = runBlocking {
+        val gone = path("gone.txt")
+        val index = FakeIndex(setOf(path("alpha.txt"), gone))
+        val model = model(index)
+        withContext(Dispatchers.Main) { model.setQuery("alpha") }
+        await(model) { it.phase == SearchPhase.DONE }
+        assertEquals(listOf("alpha.txt"), model.state.value.results.map { it.name })
+
+        withContext(Dispatchers.Main) { model.searchUnindexedNow() }
+        await(model) { it.phase == SearchPhase.DONE && it.searchedUnindexed }
+        // Hidden files are off, but .nomedia only hides from the index, not from the user.
+        assertEquals(setOf("alpha.txt", "alpha-save.sav", "alpha-sprite.png"), model.state.value.results.map { it.name }.toSet())
+        // The gone row and the files the index lacks are fixed; the .nomedia folder is left alone.
+        assertEquals(setOf(gone, path("beta.bin"), path("saves/alpha-save.sav")), scanned.toSet())
+        assertEquals(3, model.state.value.repairedEntries)
+    }
+
+    @Test
+    fun searchingUnindexedEveryTimeWalksWithEachQuery() = runBlocking {
+        val model = model(FakeIndex(setOf(path("alpha.txt"))))
+        withContext(Dispatchers.Main) { model.setSearchUnindexed(true) }
+        withContext(Dispatchers.Main) { model.setQuery("sprite") }
+        await(model) { it.phase == SearchPhase.DONE && it.searchedQuery == "sprite" }
+        assertEquals(listOf("alpha-sprite.png"), model.state.value.results.map { it.name })
+        assertTrue(model.state.value.searchedUnindexed)
+    }
+
+    @Test
+    fun volumesTheIndexDoesNotCoverAreWalkedAutomatically() = runBlocking {
+        val model = model(FakeIndex(emptySet(), covers = false))
+        withContext(Dispatchers.Main) { model.setQuery("beta") }
+        await(model) { it.phase == SearchPhase.DONE && it.searchedQuery == "beta" }
+        assertEquals(listOf("beta.bin"), model.state.value.results.map { it.name })
+        assertTrue(model.state.value.searchedUnindexed)
+        assertTrue(walkedFolders.get() > 0)
+    }
+
+    @Test
+    fun returningKeepsTheResultsAndOnlyDropsWhatIsGone() = runBlocking {
+        val index = FakeIndex(setOf(path("alpha.txt")))
+        val model = model(index)
+        withContext(Dispatchers.Main) { model.setQuery("alpha") }
+        await(model) { it.phase == SearchPhase.DONE }
+        withContext(Dispatchers.Main) { model.searchUnindexedNow() }
+        await(model) { it.phase == SearchPhase.DONE && it.searchedUnindexed }
+        val walks = walkedFolders.get()
+
+        File(path("saves/alpha-save.sav")).delete()
+        root.resolve("alpha-new.txt").writeText("new")
+        index.known = index.known + path("alpha-new.txt")
+        withContext(Dispatchers.Main) { model.onReturn() }
+        await(model) { state -> state.results.any { it.name == "alpha-new.txt" } }
+        assertEquals(setOf("alpha.txt", "alpha-new.txt", "alpha-sprite.png"), model.state.value.results.map { it.name }.toSet())
+        assertEquals("Nothing is walked again", walks, walkedFolders.get())
+        assertTrue(model.state.value.searchedUnindexed)
+    }
+
+    @Test
+    fun theTypeFilterOnlyNarrowsWhatIsShown() = runBlocking {
+        root.resolve("alpha-folder").mkdirs()
+        val model = model(FakeIndex(setOf(path("alpha.txt"), path("alpha-folder"))))
+        withContext(Dispatchers.Main) { model.setQuery("alpha") }
+        await(model) { it.phase == SearchPhase.DONE }
+        withContext(Dispatchers.Main) { model.setTypeFilter(FileTypeFilter.FOLDERS) }
+        assertEquals(listOf("alpha-folder"), model.state.value.shown.map { it.name })
+        assertEquals(2, model.state.value.results.size)
+    }
+
+    @Test
+    fun aGoneResultIsRemovedAndForgottenByTheIndex() = runBlocking {
+        val model = model(FakeIndex(setOf(path("alpha.txt"))))
+        withContext(Dispatchers.Main) { model.setQuery("alpha") }
+        await(model) { it.phase == SearchPhase.DONE }
+        val file = model.state.value.results.single()
+        assertTrue(withContext(Dispatchers.Main) { model.validate(file) })
+        File(file.path).delete()
+        assertFalse(withContext(Dispatchers.Main) { model.validate(file) })
+        assertTrue(model.state.value.results.isEmpty())
+        assertEquals(1, model.state.value.staleEntries)
+        withTimeout(5_000) { while (file.path !in scanned) delay(25) }
+    }
+
+    @Test
+    fun withoutAccessNothingIsRead() = runBlocking {
+        val index = FakeIndex(setOf(path("alpha.txt")))
+        val model = model(index, granted = false)
+        withContext(Dispatchers.Main) { model.setQuery("alpha") }
+        await(model) { it.phase == SearchPhase.DENIED }
+        assertEquals(0, index.queries.get())
+        assertTrue(model.state.value.results.isEmpty())
+    }
+
+    private fun path(relative: String) = root.resolve(relative).path
+
+    private suspend fun model(index: IndexedFileSource, granted: Boolean = true): StorageSearchViewModel =
         withContext(Dispatchers.Main) {
-            viewModel.setQuery("   ")
-            viewModel.submit(false, true)
-            viewModel.setQuery("alpha")
-        }
-        assertEquals(0, reads.get())
-        assertTrue(viewModel.state.value.submittedQuery.isEmpty())
-        withContext(Dispatchers.Main) { viewModel.submit(false, true) }
-        await(viewModel) { it.result.status == CategoryScanStatus.COMPLETE }
-        assertEquals(listOf("alpha.txt"), viewModel.state.value.result.files.map { it.name })
-    }
-
-    @Test
-    fun replacingAQueryRejectsAnOlderBlockedVolumeRead() = runBlocking {
-        val entered = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        val returned = CountDownLatch(1)
-        val reads = AtomicInteger()
-        val viewModel = model(volumeProvider = {
-            if (reads.incrementAndGet() == 1) {
-                entered.countDown()
-                check(release.await(5, TimeUnit.SECONDS))
-                returned.countDown()
+            StorageSearchViewModel(
+                application,
+                SavedStateHandle(),
+                walker = StorageCategoryIndex(canRead = { walkedFolders.incrementAndGet(); true }),
+                index = index,
+                volumeProvider = { listOf(StorageVolumeInfo("Test storage", root.path, true, false, "mounted")) },
+                permissionGranted = { granted },
+                preferences = null,
+                repairScanner = { scanned += it },
+            ).also {
+                store.put("search", it)
+                it.configure(showHidden = false, accessGranted = granted)
             }
-            volumes()
-        })
-        try {
-            withContext(Dispatchers.Main) {
-                viewModel.setQuery("alpha")
-                viewModel.submit(false, true)
-            }
-            assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
-            withContext(Dispatchers.Main) {
-                viewModel.setQuery("beta")
-                viewModel.submit(false, true)
-            }
-            await(viewModel) { it.submittedQuery == "beta" && it.result.status == CategoryScanStatus.COMPLETE }
-            release.countDown()
-            assertTrue(withContext(Dispatchers.IO) { returned.await(5, TimeUnit.SECONDS) })
-            withContext(Dispatchers.Main) {
-                assertEquals("beta", viewModel.state.value.submittedQuery)
-                assertEquals(listOf("beta.bin"), viewModel.state.value.result.files.map { it.name })
-            }
-        } finally {
-            release.countDown()
         }
-    }
-
-    @Test
-    fun cancellationWhileLoadingVolumesKeepsTheCancelledState() = runBlocking {
-        val entered = CountDownLatch(1)
-        val release = CountDownLatch(1)
-        val viewModel = model(volumeProvider = {
-            entered.countDown()
-            check(release.await(5, TimeUnit.SECONDS))
-            volumes()
-        })
-        try {
-            withContext(Dispatchers.Main) {
-                viewModel.setQuery("alpha")
-                viewModel.submit(false, true)
-            }
-            assertTrue(withContext(Dispatchers.IO) { entered.await(5, TimeUnit.SECONDS) })
-            withContext(Dispatchers.Main) { viewModel.cancel() }
-            assertEquals(CategoryScanStatus.CANCELLED, viewModel.state.value.result.status)
-            assertTrue(viewModel.state.value.result.files.isEmpty())
-        } finally {
-            release.countDown()
-        }
-    }
-
-    @Test
-    fun changedFilesAreRemovedAndPermissionLossClearsResults() = runBlocking {
-        var granted = true
-        val viewModel = model(permission = { granted })
-        withContext(Dispatchers.Main) {
-            viewModel.setQuery("alpha")
-            viewModel.submit(false, true)
-        }
-        await(viewModel) { it.result.status == CategoryScanStatus.COMPLETE }
-        val file = viewModel.state.value.result.files.single()
-        assertTrue(withContext(Dispatchers.Main) { viewModel.validate(file) })
-        File(file.path).appendText("changed")
-        assertFalse(withContext(Dispatchers.Main) { viewModel.validate(file) })
-        assertTrue(viewModel.state.value.result.files.isEmpty())
-        assertEquals(1, viewModel.state.value.result.staleEntries)
-        assertEquals(CategoryScanStatus.PARTIAL, viewModel.state.value.result.status)
-        granted = false
-        withContext(Dispatchers.Main) { viewModel.refresh(false, false) }
-        assertEquals(CategoryScanStatus.DENIED, viewModel.state.value.result.status)
-        assertTrue(viewModel.state.value.result.files.isEmpty())
-    }
-
-    private suspend fun model(
-        volumeProvider: () -> List<StorageVolumeInfo> = ::volumes,
-        permission: () -> Boolean = { true },
-    ): StorageSearchViewModel = withContext(Dispatchers.Main) {
-        StorageSearchViewModel(application, volumeProvider = volumeProvider, permissionGranted = permission).also {
-            store.put("search", it)
-        }
-    }
-
-    private fun volumes() = listOf(StorageVolumeInfo("Test storage", root.path, true, false, "mounted"))
 
     private suspend fun await(viewModel: StorageSearchViewModel, condition: (StorageSearchState) -> Boolean) {
         withTimeout(10_000) { while (!condition(viewModel.state.value)) delay(25) }
