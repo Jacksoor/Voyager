@@ -36,7 +36,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.voyagerfiles.viewmodel.FileBrowserViewModel
-import com.voyagerfiles.data.index.StorageCategory
+import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.R
 import com.voyagerfiles.util.FolderShortcuts
 import kotlinx.coroutines.Dispatchers
@@ -52,9 +52,6 @@ sealed class Screen(val route: String) {
     }
     data object Duplicates : Screen("duplicates/{path}") {
         fun createRoute(path: String): String = "duplicates/${Uri.encode(path)}"
-    }
-    data object Category : Screen("category/{category}") {
-        fun createRoute(category: StorageCategory): String = "category/${category.name}"
     }
     data object Search : Screen("search")
     data object Connections : Screen("connections")
@@ -79,6 +76,7 @@ fun AppNavigation(
     var confirmRoot by remember { mutableStateOf(false) }
     var showShizuku by remember { mutableStateOf(false) }
     var storageSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
+    var storageSearchType by rememberSaveable { mutableStateOf<FileTypeFilter?>(null) }
     val sessionClosureGeneration by viewModel.sessionClosureGeneration.collectAsState()
 
     LaunchedEffect(sessionClosureGeneration) {
@@ -155,7 +153,11 @@ fun AppNavigation(
                     },
                     hasAllFilesAccess = hasAllFilesAccess,
                     onRequestAllFilesAccess = onRequestAllFilesAccess,
-                    onNavigateToCategory = { navController.navigate(Screen.Category.createRoute(it)) },
+                    // Quick Access opens the search with the tile's type listed.
+                    onNavigateToCategory = {
+                        storageSearchType = it.filter
+                        navController.navigate(Screen.Search.route)
+                    },
                     onNavigateToSearch = { navController.navigate(Screen.Search.route) },
                 )
             }
@@ -191,23 +193,6 @@ fun AppNavigation(
                 })
             }
 
-            composable(
-                route = Screen.Category.route,
-                arguments = listOf(navArgument("category") { type = NavType.StringType }),
-            ) { entry ->
-                val category = StorageCategory.entries.firstOrNull { it.name == entry.arguments?.getString("category") }
-                val browseState by viewModel.browseState.collectAsState()
-                if (category != null) {
-                    CategoryScreen(
-                        category = category,
-                        showHidden = browseState.showHidden,
-                        hasAllFilesAccess = hasAllFilesAccess,
-                        onRequestAllFilesAccess = onRequestAllFilesAccess,
-                        onNavigateBack = { navController.popBackStack() },
-                    )
-                }
-            }
-
             composable(Screen.Search.route) {
                 val browseState by viewModel.browseState.collectAsState()
                 StorageSearchScreen(
@@ -221,6 +206,8 @@ fun AppNavigation(
                     },
                     requestedQuery = storageSearchQuery,
                     onRequestedQueryConsumed = { storageSearchQuery = null },
+                    requestedType = storageSearchType,
+                    onRequestedTypeConsumed = { storageSearchType = null },
                 )
             }
 

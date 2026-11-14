@@ -496,9 +496,6 @@
     <string name="duplicates_group">%1$d copies, %2$s each</string>
     <string name="duplicates_removed">%1$d removed; %2$d could not be removed. %3$s</string>
     <string name="duplicates_operation_busy">Wait for the current file operation to finish, then try again.</string>
-    <string name="category_scope">Dateien im eingebundenen gemeinsamen Speicher werden durchsucht. App-privater Speicher und über Dokumentanbieter freigegebene Ordner werden nicht durchsucht.</string>
-    <string name="category_hidden_included">Versteckte Dateien enthalten (Einstellungen).</string>
-    <string name="category_hidden_excluded">Versteckte Dateien ausgeschlossen (Einstellungen).</string>
     <string name="category_pending">Nicht gescannt</string>
     <string name="category_scanning">Scannen</string>
     <string name="category_complete">Scan abgeschlossen</string>
@@ -507,10 +504,6 @@
     <string name="category_limited">Ergebnislimit erreicht. Es werden die ersten 50.000 Treffer angezeigt; die Abdeckung ist unvollständig.</string>
     <string name="category_failed">Scan fehlgeschlagen. Aktualisieren Sie die Seite, um es erneut zu versuchen; die Ergebnisse sind unvollständig.</string>
     <string name="category_permission_required">Für das Scannen von Kategorien ist vollständiger Speicherzugriff erforderlich.</string>
-    <string name="category_results">Treffer: %1$d · Veraltete Einträge entfernt: %2$d</string>
-    <string name="category_coverage_counts">Geprüfte Dateien: %1$d · Nicht zugängliche Einträge: %2$d · Übersprungene Einträge: %3$d</string>
-    <string name="category_skipped_explanation">Die Zählungen beziehen sich ausschließlich auf besuchte Einträge. Ausgelassene Einträge umfassen ausgeschlossene versteckte Ordner, Verknüpfungen, doppelte Stammverzeichnisse, spezielle Dateien und Ordner, die tiefer als 128 Ebenen liegen. Der Inhalt ausgelassener oder nicht zugänglicher Ordner ist unbekannt.</string>
-    <string name="category_stale_file">Diese Datei wurde geändert oder ist nicht mehr zugänglich. Aktualisieren Sie die Kategorie und versuchen Sie es erneut.</string>
     <string name="root_title">Root access</string>
     <string name="root_open">Open root session</string>
     <string name="root_warning">Allow Voyager to request superuser access for this session? Changes under / can damage Android or other apps. Root operations bypass Trash. Tap a regular file to edit UTF-8 text up to 256 KiB. Close the session to stop root access.</string>

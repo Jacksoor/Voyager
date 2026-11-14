@@ -70,6 +70,17 @@ class StorageCategoryIndex(
         hasPermission: () -> Boolean,
     ): Flow<CategoryIndexState> = scanMatching(volumes, showHidden, hasPermission, accepts = category.filter::matches)
 
+    /** Every file of [type] (folders for [FileTypeFilter.FOLDERS]); [onVisit] as for [search]. */
+    fun scanType(
+        type: FileTypeFilter,
+        volumes: List<StorageVolumeInfo>,
+        showHidden: Boolean,
+        onVisit: ((path: String, isDirectory: Boolean) -> Unit)? = null,
+        hasPermission: () -> Boolean,
+    ): Flow<CategoryIndexState> = scanMatching(
+        volumes, showHidden, hasPermission, includeDirectories = type == FileTypeFilter.FOLDERS, onVisit = onVisit, accepts = type::matches,
+    )
+
     /**
      * Files and folders whose name contains every word of [query]. [onVisit] sees every file and
      * folder the walk reaches, matching or not (to compare the walk with MediaStore).
