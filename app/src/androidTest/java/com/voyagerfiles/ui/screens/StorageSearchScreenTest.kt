@@ -13,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -134,10 +135,20 @@ class StorageSearchScreenTest {
         compose.waitUntil(10_000) { model.state.value.browsedType == FileTypeFilter.IMAGES && model.state.value.phase == SearchPhase.DONE }
         compose.onNodeWithText("photo.jpg").assertIsDisplayed()
         compose.onNodeWithContentDescription("Sort").assertIsDisplayed()
+        // Tapping the field already sorted by flips the direction.
+        val order = model.state.value.sort.order
+        compose.onNodeWithContentDescription("Sort").performClick()
+        compose.onNodeWithText(stringFor(model.state.value.sort.by)).performClick()
+        compose.waitUntil(5_000) { model.state.value.sort.order != order }
+        compose.onNodeWithContentDescription("Sort").performClick()
+        compose.onNodeWithText(stringFor(model.state.value.sort.by)).performClick()
+        compose.waitUntil(5_000) { model.state.value.sort.order == order }
         type("photo")
         compose.waitUntil(10_000) { model.state.value.searchedQuery == "photo" }
         compose.onNodeWithContentDescription("Sort").assertDoesNotExist()
     }
+
+    private fun stringFor(by: com.voyagerfiles.data.model.SortBy) = application.getString(by.labelRes)
 
     @Test
     fun aQuickAccessTileOpensTheSearchWithItsTypeAndOffersPermissionRecovery() {
@@ -151,6 +162,8 @@ class StorageSearchScreenTest {
             compose.onNodeWithText("Apps").performScrollTo().performClick()
             compose.onNodeWithText("Full storage access is required to search shared storage.").assertIsDisplayed()
             compose.onNode(hasText("Apps") and isSelected()).assertExists()
+            // Browsing a type: the keyboard stays down.
+            compose.onNodeWithTag(STORAGE_SEARCH_QUERY_TAG).assertIsNotFocused()
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithText("Quick Access").assertExists()
         } finally {

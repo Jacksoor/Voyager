@@ -55,8 +55,13 @@ fun FileSortMenu(
                             )
                         }
                     },
+                    // The field already sorted by flips the direction, like a table header.
                     onClick = {
-                        onSortByChange(sort)
+                        if (sortBy == sort) {
+                            onSortOrderChange(if (sortOrder == SortOrder.ASCENDING) SortOrder.DESCENDING else SortOrder.ASCENDING)
+                        } else {
+                            onSortByChange(sort)
+                        }
                         showSortMenu = false
                     },
                 )
