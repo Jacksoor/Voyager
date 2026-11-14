@@ -81,9 +81,9 @@ class BrowserLocationsModelTest {
     }
 
     @Test
-    fun omitsConnectionsThatAlreadyHaveASession() {
+    fun omitsConnectionsThatAlreadyHaveASessionEvenAPinnedOne() {
         val model = BrowserLocationsModel.forState(
-            sessions = listOf(remoteSession(nas)),
+            sessions = listOf(remoteSession(nas).copy(pinned = true)),
             connections = listOf(nas, router),
             bookmarks = emptyList(),
             storageVolumes = emptyList(),

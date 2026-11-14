@@ -546,8 +546,8 @@ fun BrowserScreen(
         }
     }
 
-    // Back, with Android's predictive gesture: while it is held, the screen shrinks a little and a
-    // chip names where it leads. Leaving the browser is left to the navigation host when it can
+    // Back, with Android's predictive gesture: while it is held, a chip names where it leads. The
+    // screen itself stays put, since the folder above isn't shown behind it. Leaving the browser is left to the navigation host when it can
     // pop this screen itself ([leaveViaSystemBack]), so that gesture previews Home or search.
     val upPath = remember(state.currentPath, state.isLoading, activeSession) { viewModel.upTarget() }
     val backTarget = backTarget(
@@ -635,7 +635,6 @@ fun BrowserScreen(
         Scaffold(
             modifier = Modifier
                 .weight(1f)
-                .predictiveBackShift(backProgress, backFromLeft, active = backTarget is BackTarget.Folder)
                 .then(if (useSessionRail) Modifier.consumeWindowInsets(WindowInsets.safeDrawing.only(WindowInsetsSides.Start)) else Modifier),
             snackbarHost = { SnackbarHost(snackbarHostState) },
             topBar = {

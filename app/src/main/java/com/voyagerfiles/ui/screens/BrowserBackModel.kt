@@ -2,7 +2,6 @@ package com.voyagerfiles.ui.screens
 
 import android.content.ContextWrapper
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -75,18 +74,6 @@ internal fun backTarget(
     upPath != null -> BackTarget.Folder(folderName(upPath), upPath)
     else -> BackTarget.Leave
 }
-
-/** How much the screen shrinks and slides while a Back gesture to a folder is held (Material's values). */
-internal fun Modifier.predictiveBackShift(progress: Float, fromLeft: Boolean, active: Boolean): Modifier =
-    if (!active || progress <= 0f) this else graphicsLayer {
-        val eased = FastOutSlowInEasing.transform(progress)
-        val scale = 1f - 0.08f * eased
-        scaleX = scale
-        scaleY = scale
-        translationX = (if (fromLeft) 1f else -1f) * 24.dp.toPx() * eased
-        shape = RoundedCornerShape(28.dp * eased)
-        clip = true
-    }
 
 /** How long a Back gesture is held before its chip shows, so a quick swipe doesn't flash it. */
 internal const val BACK_CHIP_DELAY_MS = 120L

@@ -55,8 +55,8 @@ data class BrowserLocationsModel(
             shizukuAvailable: Boolean = false,
         ): BrowserLocationsModel {
             val openSources = sessions.mapTo(mutableSetOf()) { it.source }
-            // A server with only pinned tabs stays listed: connecting opens an unpinned tab for it.
-            val openConnectionIds = sessions.filterNot { it.pinned }.mapNotNull { it.connectionId }.toSet()
+            // A server has one tab, pinned or not: it is listed above, so the server isn't offered again.
+            val openConnectionIds = sessions.mapNotNull { it.connectionId }.toSet()
             val openLocalRoots = sessions
                 .filter { it.source == FileSource.LOCAL }
                 .map { BrowserNavigationBounds.normalizePath(it.currentPath) }
