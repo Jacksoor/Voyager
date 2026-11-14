@@ -278,7 +278,8 @@ class StorageSearchViewModel @JvmOverloads constructor(
             _state.update { it.copy(searchedQuery = query, results = emptyList(), shown = emptyList(), phase = SearchPhase.DENIED) }
             return
         }
-        if (query.isEmpty()) {
+        // Only separators ("-", "_") is nothing to search for.
+        if (SearchTerms.parse(query).isEmpty()) {
             indexedResults = emptyList()
             walkedResults = emptyList()
             _state.update {
