@@ -1,5 +1,6 @@
 package com.voyagerfiles.data.index
 
+import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.util.StorageVolumeInfo
 import java.io.File
 import java.nio.file.Files
@@ -39,11 +40,11 @@ class StorageCategoryIndexTest {
             StorageCategory.DOCUMENTS to setOf("REPORT.TXT", "paper.pdf"),
         )
         for ((category, names) in expected) {
-            val result = index.scan(category, roots, false) { true }.last()
+            val result = index.scanType(category.filter, roots, false) { true }.last()
             assertEquals(names, result.files.map { it.name }.toSet())
             assertEquals(CategoryScanStatus.COMPLETE, result.status)
             assertEquals(8, result.coverage.sumOf { it.filesExamined })
-            assertTrue(result.files.all { index.isCurrent(it, roots) { true } })
+            assertTrue(result.files.all { index.isOpenable(it, roots) { true } })
         }
     }
 
@@ -55,13 +56,13 @@ class StorageCategoryIndexTest {
         Files.createSymbolicLink(root.toPath().resolve("cycle"), root.toPath())
         val guarded = StorageCategoryIndex(canRead = { it.fileName.toString() != "denied" })
         val roots = listOf(volume(root), volume(temporary.root).copy(description = "Disconnected", path = null, state = "unmounted"))
-        val result = guarded.scan(StorageCategory.IMAGES, roots, false) { true }.last()
+        val result = guarded.scanType(FileTypeFilter.IMAGES, roots, false) { true }.last()
         assertEquals(listOf("photo.jpg"), result.files.map { it.name })
         assertEquals(CategoryScanStatus.PARTIAL, result.status)
         assertEquals(1, result.coverage[0].inaccessibleEntries)
         assertEquals(2, result.coverage[0].skippedEntries)
         assertEquals(CategoryScanStatus.UNAVAILABLE, result.coverage[1].status)
-        val includingHidden = guarded.scan(StorageCategory.IMAGES, roots, true) { true }.last()
+        val includingHidden = guarded.scanType(FileTypeFilter.IMAGES, roots, true) { true }.last()
         assertEquals(setOf("photo.jpg", "secret.jpg"), includingHidden.files.map { it.name }.toSet())
     }
 
@@ -71,13 +72,13 @@ class StorageCategoryIndexTest {
         var checks = 0
         // The permission is checked per published batch (256 entries), not per entry: revoke it
         // after the first batch with results.
-        val states = index.scan(StorageCategory.IMAGES, listOf(volume(root)), false) { ++checks < 5 }.toList()
+        val states = index.scanType(FileTypeFilter.IMAGES, listOf(volume(root)), false) { ++checks < 5 }.toList()
         assertTrue(states.any { it.files.isNotEmpty() })
         assertEquals(CategoryScanStatus.DENIED, states.last().status)
         assertTrue(states.last().files.isEmpty())
         assertTrue(states.last().coverage.isEmpty())
         val denied = StorageCategoryIndex(canRead = { error("Must not inspect storage without permission") })
-            .scan(StorageCategory.IMAGES, listOf(volume(root)), false) { false }.last()
+            .scanType(FileTypeFilter.IMAGES, listOf(volume(root)), false) { false }.last()
         assertEquals(CategoryScanStatus.DENIED, denied.status)
     }
 
@@ -85,26 +86,27 @@ class StorageCategoryIndexTest {
         val root = temporary.newFolder("root")
         val file = write(root, "photo.jpg")
         val roots = listOf(volume(root))
-        val snapshot = index.scan(StorageCategory.IMAGES, roots, false) { true }.last().files.single()
-        assertTrue(index.isCurrent(snapshot, roots) { true })
-        assertFalse(index.isCurrent(snapshot, roots) { false })
-        assertFalse(index.isCurrent(snapshot, roots.map { it.copy(state = "unmounted") }) { true })
+        val snapshot = index.scanType(FileTypeFilter.IMAGES, roots, false) { true }.last().files.single()
+        assertTrue(index.isOpenable(snapshot, roots) { true })
+        assertFalse(index.isOpenable(snapshot, roots) { false })
+        assertFalse(index.isOpenable(snapshot, roots.map { it.copy(state = "unmounted") }) { true })
+        // A changed file still opens: MediaStore's size and date can lag behind the last write.
         file.appendText("changed")
-        assertFalse(index.isCurrent(snapshot, roots) { true })
+        assertTrue(index.isOpenable(snapshot, roots) { true })
         assertTrue(file.delete())
-        assertFalse(index.isCurrent(snapshot, roots) { true })
+        assertFalse(index.isOpenable(snapshot, roots) { true })
         val outside = write(temporary.newFolder("outside"), "other.jpg")
         Files.createSymbolicLink(file.toPath(), outside.toPath())
-        assertFalse(index.isCurrent(snapshot, roots) { true })
+        assertFalse(index.isOpenable(snapshot, roots) { true })
     }
 
     @Test fun duplicateRootsAndResultLimitNeverClaimCompleteCoverage() = runBlocking {
         val root = temporary.newFolder("root")
         repeat(4) { write(root, "$it.jpg") }
-        val duplicate = index.scan(StorageCategory.IMAGES, listOf(volume(root), volume(root)), false) { true }.last()
+        val duplicate = index.scanType(FileTypeFilter.IMAGES, listOf(volume(root), volume(root)), false) { true }.last()
         assertEquals(4, duplicate.files.size)
         assertEquals(1, duplicate.coverage[1].skippedEntries)
-        val limited = StorageCategoryIndex(maxResults = 2).scan(StorageCategory.IMAGES, listOf(volume(root)), false) { true }.last()
+        val limited = StorageCategoryIndex(maxResults = 2).scanType(FileTypeFilter.IMAGES, listOf(volume(root)), false) { true }.last()
         assertEquals(2, limited.files.size)
         assertEquals(CategoryScanStatus.LIMITED, limited.status)
         assertEquals(CategoryScanStatus.LIMITED, limited.coverage.single().status)
@@ -115,19 +117,19 @@ class StorageCategoryIndexTest {
         val nested = write(root, "nested/photo.jpg").parentFile!!
         write(root, "top.jpg")
         for (roots in listOf(listOf(volume(nested), volume(root)), listOf(volume(root), volume(nested)))) {
-            val result = index.scan(StorageCategory.IMAGES, roots, false) { true }.last()
+            val result = index.scanType(FileTypeFilter.IMAGES, roots, false) { true }.last()
             assertEquals(setOf("photo.jpg", "top.jpg"), result.files.map { it.name }.toSet())
             assertEquals(2, result.files.size)
             assertEquals(1, result.coverage.sumOf { it.skippedEntries })
         }
-        assertEquals(CategoryScanStatus.UNAVAILABLE, index.scan(StorageCategory.IMAGES, emptyList(), false) { true }.last().status)
+        assertEquals(CategoryScanStatus.UNAVAILABLE, index.scanType(FileTypeFilter.IMAGES, emptyList(), false) { true }.last().status)
     }
 
     @Test fun depthLimitReportsSkippedFolderWithoutInventingItsContentsCount() = runBlocking {
         val root = temporary.newFolder("root")
         write(root, "visible.jpg")
         write(root, "one/two/deep.jpg")
-        val result = StorageCategoryIndex(maxDepth = 2).scan(StorageCategory.IMAGES, listOf(volume(root)), false) { true }.last()
+        val result = StorageCategoryIndex(maxDepth = 2).scanType(FileTypeFilter.IMAGES, listOf(volume(root)), false) { true }.last()
         assertEquals(listOf("visible.jpg"), result.files.map { it.name })
         assertEquals(1, result.coverage.single().skippedEntries)
         assertEquals(1, result.coverage.single().filesExamined)
@@ -141,7 +143,7 @@ class StorageCategoryIndexTest {
         val states = mutableListOf<CategoryIndexState>()
         val job = launch {
             try {
-                index.scan(StorageCategory.IMAGES, listOf(volume(root)), false) { true }.collect {
+                index.scanType(FileTypeFilter.IMAGES, listOf(volume(root)), false) { true }.collect {
                     states += it
                     if (it.files.isNotEmpty()) cancel()
                 }

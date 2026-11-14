@@ -43,8 +43,10 @@ class StorageSearchNavigationTest {
             compose.onNodeWithTag("storage-search-query").performTextInput(needle)
             compose.onNodeWithTag("storage-search-query").performImeAction()
             compose.waitUntil(45_000) { compose.onAllNodesWithText("2 results").fetchSemanticsNodes().isNotEmpty() }
-            compose.onNodeWithTag("storage-search-results").performScrollToNode(hasText(needle))
-            compose.onNode(hasText(needle) and hasAnyAncestor(hasTestTag("storage-search-results"))).performClick()
+            // The folder's row, not its file's (whose location line names the folder too).
+            val folderRow = hasText(needle) and !hasText("$needle.txt") and hasAnyAncestor(hasTestTag("storage-search-results"))
+            compose.onNodeWithTag("storage-search-results").performScrollToNode(folderRow)
+            compose.onNode(folderRow).performClick()
             compose.waitUntil(10_000) { browser.browseState.value.currentPath == folder.canonicalPath && !browser.browseState.value.isLoading }
             compose.runOnIdle { browser.setSearchQuery(needle) }
             compose.onNodeWithContentDescription("More").performClick()
@@ -87,14 +89,15 @@ class StorageSearchNavigationTest {
                 assertEquals(chosenFolder.canonicalPath, browser.activeSession.value?.rootPath)
                 assertNotEquals(originalSession, browser.activeSession.value?.id)
             }
+            // Deleted while the browser is open (through FUSE, so MediaStore forgets it too).
+            assertTrue(first.delete())
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithTag("storage-search-query").assertIsDisplayed()
-            // Back from the browser, the results are still there; nothing starts over.
-            compose.onNodeWithText("2 results").assertIsDisplayed()
+            // Back from the browser, the results are still there; the index is asked what changed.
+            compose.waitUntil(10_000) { compose.onAllNodesWithText("1 result").fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithContentDescription("Open folder for $chosenPath").assertIsDisplayed()
             compose.onNodeWithContentDescription("Back").performClick()
             compose.onNodeWithContentDescription("Search shared storage").assertIsDisplayed()
-            assertEquals("first", first.readText())
             assertEquals("chosen", chosen.readText())
         } finally {
             fixture.deleteRecursively()

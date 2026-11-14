@@ -41,14 +41,59 @@ class HybridSearchTest {
         // ASCII names: the characters in order, separators allowed between them; LIKE folds case.
         assertEquals("%i%m%g%2%0%2%4%", SearchTerms.plainPattern("IMG_2024"))
         assertEquals("%1%0%0%\\%%", SearchTerms.plainPattern("100%"))
-        // Other names: letters that may carry an accent are one character; ß/æ/œ may stand for two letters.
-        assertEquals("%_%m%_%2%0%2%4%", SearchTerms.accentPattern("img2024"))
-        assertEquals("%_%_%_%_%%_%", SearchTerms.accentPattern("strasse"))
-        assertEquals("%_%_%f%_%", SearchTerms.accentPattern("café"))
+        // Other names are all returned and checked in Kotlin.
         val (selection, args) = SearchTerms.selection("name", "cafe")
-        assertEquals("(name LIKE ? ESCAPE '\\' OR (name GLOB ? AND name LIKE ? ESCAPE '\\'))", selection)
-        assertEquals(listOf("%c%a%f%e%", "*[^ -~]*", "%_%_%f%_%"), args.toList())
+        assertEquals("(name LIKE ? ESCAPE '\\' OR name GLOB ?)", selection)
+        assertEquals(listOf("%c%a%f%e%", "*[^ -~]*"), args.toList())
     }
+
+    @Test
+    fun everyNameTheExactCheckAcceptsIsReturnedByTheSelection() {
+        val names = listOf(
+            "IMG_2024-03-17.jpg", "Report (final).PDF", "100% done.txt", "a_b.txt", "Café de Flore.jpg", "Übung.pdf",
+            "Straße.txt", "Ærø.png", "사진", "사진.md", "dŵr.txt", "ĵaŭdo.odt", "Þór.txt", "Привет.doc", "😀 party.jpg",
+            "ﬁle.txt", "İstanbul.jpg", "KELVIN.txt",
+        )
+        val queries = listOf(
+            "img2024", "img 03", "final", "100%", "a_b", "cafe", "ubung", "strasse", "straße", "aero", "사진", "사", "dwr",
+            "jaudo", "thor", "þór", "привет", "party", "😀", "istanbul", "kelvin", "jpg",
+        )
+        for (query in queries) {
+            val terms = SearchTerms.parse(query)
+            for (name in names.filter { SearchTerms.matches(it, terms) }) {
+                for (term in terms) {
+                    val (_, args) = SearchTerms.selection("name", term)
+                    assertTrue("\"$query\" must reach \"$name\"", sqlLike(name, args[0]) || sqlGlobNonAscii(name))
+                }
+            }
+        }
+    }
+
+    /** SQLite's LIKE with ESCAPE '\': `%` any run, `_` one code point, ASCII letters folded. */
+    private fun sqlLike(text: String, pattern: String): Boolean {
+        val regex = StringBuilder()
+        val points = pattern.codePoints().toArray()
+        var i = 0
+        while (i < points.size) {
+            val c = points[i]
+            when {
+                c == '\\'.code && i + 1 < points.size -> { i++; regex.append(literal(points[i])) }
+                c == '%'.code -> regex.append("(?s:.*)")
+                c == '_'.code -> regex.append("(?s:.)")
+                else -> regex.append(literal(c))
+            }
+            i++
+        }
+        return Regex(regex.toString()).matches(text)
+    }
+
+    private fun literal(c: Int): String {
+        val ch = String(Character.toChars(c))
+        return if (c < 128 && Character.isLetter(c)) "[${ch.lowercase()}${ch.uppercase()}]" else Regex.escape(ch)
+    }
+
+    /** `GLOB '*[^ -~]*'`: some code point outside printable ASCII. */
+    private fun sqlGlobNonAscii(text: String) = text.codePoints().anyMatch { it < 0x20 || it > 0x7E }
 
     @Test
     fun hiddenMeansADotNameBelowTheVolumeRoot() {
@@ -96,6 +141,25 @@ class HybridSearchTest {
             exists = { it == "/s/Android/data/x" },
         )
         assertEquals(listOf("/s/gone", "/s/gone-file.txt", "/s/saves/save1.sav"), plan)
+    }
+
+    @Test
+    fun nothingBelowAnUnreadableFolderCountsAsGoneAndDeclinedPathsAreNotSentAgain() {
+        val plan = MediaStoreRepair.plan(
+            roots = listOf("/s"),
+            indexed = setOf("/s/Music/a.mp3", "/s/Music/sub/b.mp3", "/s/Music", "/s/old.txt", "/s/stuck.txt"),
+            visitedFiles = setOf("/s/new.txt", "/s/refused.txt"),
+            visitedDirs = emptySet(),
+            // The walk couldn't list Music (a card failing mid-walk): its rows may well be fine.
+            unreadable = setOf("/s/Music"),
+            declined = setOf("/s/stuck.txt", "/s/refused.txt"),
+            exists = { false },
+        )
+        assertEquals(listOf("/s/old.txt", "/s/new.txt"), plan)
+        // Counted as fixed only if MediaStore changed: the rest is declined for this process.
+        val before = setOf("/s/old.txt")
+        assertEquals(1, MediaStoreRepair.settle(listOf("/s/old.txt", "/s/new.txt"), indexedBefore = before, indexedAfter = setOf("/s/old.txt", "/s/new.txt")))
+        assertTrue("/s/old.txt" in MediaStoreRepair.declinedSnapshot())
     }
 
     @Test

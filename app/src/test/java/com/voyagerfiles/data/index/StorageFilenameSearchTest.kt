@@ -1,5 +1,6 @@
 package com.voyagerfiles.data.index
 
+import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.util.StorageVolumeInfo
 import java.io.File
 import java.nio.file.Files
@@ -43,11 +44,11 @@ class StorageFilenameSearchTest {
         val result = index.search("REPORT", volumes, false) { true }.last()
         assertEquals(setOf(folder.path, child.path), result.files.map { it.path }.toSet())
         val directory = result.files.single { it.isDirectory }
-        assertTrue(index.isCurrent(directory, volumes) { true })
+        assertTrue(index.isOpenable(directory, volumes) { true })
         assertTrue(folder.deleteRecursively())
-        assertFalse(index.isCurrent(directory, volumes) { true })
+        assertFalse(index.isOpenable(directory, volumes) { true })
         folder.writeText("replacement file")
-        assertFalse(index.isCurrent(directory, volumes) { true })
+        assertFalse(index.isOpenable(directory, volumes) { true })
     }
 
     @Test
@@ -61,7 +62,7 @@ class StorageFilenameSearchTest {
         assertEquals(CategoryScanStatus.LIMITED, limited.status)
         assertEquals(1, limited.files.size)
         assertTrue(limited.files.single().isDirectory)
-        assertTrue(StorageCategoryIndex().scan(StorageCategory.DOCUMENTS, volumes, false) { true }.last().files.isEmpty())
+        assertTrue(StorageCategoryIndex().scanType(FileTypeFilter.DOCUMENTS, volumes, false) { true }.last().files.isEmpty())
     }
 
     @Test

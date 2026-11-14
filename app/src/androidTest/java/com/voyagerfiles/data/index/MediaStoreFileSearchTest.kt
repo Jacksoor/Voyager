@@ -21,7 +21,8 @@ class MediaStoreFileSearchTest {
 
     @Before
     fun setUp() {
-        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && Environment.isExternalStorageManager())
+        // Android 11's MediaStore doesn't index this app's own new files in time; the search uses it from 12.
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && Environment.isExternalStorageManager())
         folder = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "voyager-$tag").apply { mkdirs() }
         for (name in listOf("Café $tag.txt", "IMG_2024_$tag.txt", "Straße $tag.txt", "Übung-$tag.txt", "other $tag.txt")) {
             folder.resolve(name).writeText(name)

@@ -86,20 +86,20 @@ class StorageCategoryIndexAndroidTest {
                 StorageCategory.DOCUMENTS to "notes.TXT",
             )
             for ((category, name) in expected) {
-                val state = index.scan(category, listOf(volume), false) { true }.last()
+                val state = index.scanType(category.filter, listOf(volume), false) { true }.last()
                 val result = state.files.single()
                 assertEquals(name, result.name)
                 assertEquals(1, state.coverage.single().skippedEntries)
                 assertEquals(CategoryScanStatus.PARTIAL, state.status)
-                assertTrue(index.isCurrent(result, listOf(volume)) { true })
+                assertTrue(index.isOpenable(result, listOf(volume)) { true })
                 assertTrue(FileUtils.createOpenFileIntent(context, result).isSuccess)
             }
-            val images = index.scan(StorageCategory.IMAGES, listOf(volume), true) { true }.last()
+            val images = index.scanType(FileTypeFilter.IMAGES, listOf(volume), true) { true }.last()
             assertEquals(2, images.files.size)
             val snapshot = images.files.first { it.name == photo.name }
             assertTrue(photo.delete())
-            assertFalse(index.isCurrent(snapshot, listOf(volume)) { true })
-            assertTrue(index.scan(StorageCategory.IMAGES, listOf(volume), false) { true }.last().files.isEmpty())
+            assertFalse(index.isOpenable(snapshot, listOf(volume)) { true })
+            assertTrue(index.scanType(FileTypeFilter.IMAGES, listOf(volume), false) { true }.last().files.isEmpty())
         } finally {
             assertTrue(root.deleteRecursively())
         }

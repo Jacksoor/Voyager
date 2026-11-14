@@ -171,35 +171,17 @@ object SearchTerms {
     /**
      * Narrows the MediaStore rows to a superset of the names [term] [matches], before the exact
      * check. ASCII names (most) must contain the term's characters in order, with anything (a
-     * separator) between them: LIKE folds ASCII case itself. Names with other characters must
-     * have the term's length in characters, roughly: every letter that may carry an accent stands
-     * for one character, and "ss", "ae", "oe" may be one letter (ß, æ, œ).
+     * separator) between them: LIKE folds ASCII case itself. Names with any other character are
+     * all returned and checked in Kotlin: folding them (accents, ß, Hangul syllables into jamo)
+     * changes their length, so no pattern narrows them safely, and they are few (152 of 28,520
+     * rows on a German phone).
      */
     fun selection(column: String, term: String): Pair<String, Array<String>> =
-        "($column LIKE ? ESCAPE '\\' OR ($column GLOB ? AND $column LIKE ? ESCAPE '\\'))" to
-            arrayOf(plainPattern(term), NON_ASCII_GLOB, accentPattern(term))
+        "($column LIKE ? ESCAPE '\\' OR $column GLOB ?)" to arrayOf(plainPattern(term), NON_ASCII_GLOB)
 
     /** The term's characters in order, anything between them: "img2024" finds "IMG_2024". */
     fun plainPattern(term: String): String =
         "%" + fold(term).map { escapeLike(it) }.joinToString("%") + "%"
-
-    /** Like [plainPattern], with each letter that may carry an accent, or isn't ASCII, as `_`. */
-    fun accentPattern(term: String): String {
-        val folded = fold(term)
-        val tokens = mutableListOf<String>()
-        var i = 0
-        while (i < folded.length) {
-            if (i + 1 < folded.length && folded.substring(i, i + 2) in SPELLED_PAIRS) {
-                tokens += ""
-                i += 2
-                continue
-            }
-            val c = folded[i]
-            tokens += if (c.code < 128 && (c.isDigit() || c in PLAIN_LETTERS || !c.isLetter())) escapeLike(c) else "_"
-            i++
-        }
-        return "%" + tokens.joinToString("%") + "%"
-    }
 
     private fun escapeLike(c: Char): String = if (c == '%' || c == '_' || c == '\\') "\\$c" else c.toString()
 
@@ -245,9 +227,5 @@ object SearchTerms {
 
     private val WORD_BREAK = Regex("[\\s._\\-()\\[\\]]+|(?<=\\p{Ll})(?=\\p{Lu})")
 
-    /** ASCII letters without accented forms in Latin scripts; every other letter may carry one. */
-    private val PLAIN_LETTERS = setOf('b', 'f', 'h', 'j', 'm', 'p', 'q', 'v', 'w', 'x')
-
     private val SPELLED_OUT = mapOf('ß' to "ss", 'æ' to "ae", 'œ' to "oe", 'ø' to "o", 'ł' to "l", 'đ' to "d", 'þ' to "th")
-    private val SPELLED_PAIRS = setOf("ss", "ae", "oe")
 }

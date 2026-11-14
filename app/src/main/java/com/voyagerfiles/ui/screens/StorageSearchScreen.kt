@@ -127,21 +127,22 @@ fun StorageSearchScreen(
             onRequestedQueryConsumed()
         }
     }
-    // Back from an opened result: the results stay; the index is only asked what changed.
+    // Back from an opened result: the results stay; the index is only asked what changed. Opening
+    // a folder in the browser takes this screen out of composition, so the model keeps the "left"
+    // mark, not this effect.
     DisposableEffect(lifecycleOwner) {
-        var stopped = false
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_STOP -> stopped = true
-                Lifecycle.Event.ON_START -> if (stopped) {
-                    stopped = false
-                    searchViewModel.onReturn()
-                }
+                Lifecycle.Event.ON_STOP -> searchViewModel.onLeave()
+                Lifecycle.Event.ON_START -> searchViewModel.onReturn()
                 else -> Unit
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            searchViewModel.onLeave()
+        }
     }
     fun open(file: FileItem, containingFolder: Boolean) {
         scope.launch(Dispatchers.Main.immediate) {
@@ -267,7 +268,16 @@ internal fun StorageSearchContent(
         snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
+            // The chosen type stays in view: Quick Access opens with one that may sit off screen.
+            val chips = rememberLazyListState()
+            LaunchedEffect(state.typeFilter) {
+                val index = FileTypeFilter.entries.indexOf(state.typeFilter)
+                val visible = chips.layoutInfo.visibleItemsInfo.firstOrNull { it.index == index }
+                val end = chips.layoutInfo.viewportEndOffset - chips.layoutInfo.afterContentPadding
+                if (visible == null || visible.offset < 0 || visible.offset + visible.size > end) chips.animateScrollToItem(index)
+            }
             LazyRow(
+                state = chips,
                 contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {

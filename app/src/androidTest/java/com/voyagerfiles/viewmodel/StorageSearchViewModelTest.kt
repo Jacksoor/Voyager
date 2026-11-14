@@ -135,11 +135,35 @@ class StorageSearchViewModelTest {
         File(path("saves/alpha-save.sav")).delete()
         root.resolve("alpha-new.txt").writeText("new")
         index.known = index.known + path("alpha-new.txt")
+        // Only after the screen was left: the first start of the screen asks nothing.
         withContext(Dispatchers.Main) { model.onReturn() }
+        assertEquals(3, model.state.value.results.size)
+        withContext(Dispatchers.Main) {
+            model.onLeave()
+            model.onReturn()
+        }
         await(model) { state -> state.results.any { it.name == "alpha-new.txt" } }
         assertEquals(setOf("alpha.txt", "alpha-new.txt", "alpha-sprite.png"), model.state.value.results.map { it.name }.toSet())
         assertEquals("Nothing is walked again", walks, walkedFolders.get())
         assertTrue(model.state.value.searchedUnindexed)
+    }
+
+    @Test
+    fun walkedHiddenFilesGoWhenHiddenFilesAreTurnedOff() = runBlocking {
+        root.resolve(".cache").mkdirs()
+        root.resolve(".cache/alpha-hidden.txt").writeText("hidden")
+        val model = model(FakeIndex(setOf(path("alpha.txt"))))
+        withContext(Dispatchers.Main) {
+            model.configure(showHidden = true, accessGranted = true)
+            model.setQuery("alpha")
+        }
+        await(model) { it.phase == SearchPhase.DONE && it.searchedQuery == "alpha" }
+        withContext(Dispatchers.Main) { model.searchUnindexedNow() }
+        await(model) { state -> state.phase == SearchPhase.DONE && state.results.any { it.name == "alpha-hidden.txt" } }
+
+        withContext(Dispatchers.Main) { model.configure(showHidden = false, accessGranted = true) }
+        await(model) { state -> state.phase == SearchPhase.DONE && state.results.none { it.name == "alpha-hidden.txt" } }
+        assertFalse(model.state.value.searchedUnindexed)
     }
 
     @Test
@@ -227,7 +251,15 @@ class StorageSearchViewModelTest {
                 volumeProvider = { listOf(StorageVolumeInfo("Test storage", root.path, true, false, "mounted")) },
                 permissionGranted = { granted },
                 preferences = null,
-                repairScanner = { scanned += it },
+                // Like the media scanner: a gone path loses its row and the rows below it, a file gains one.
+                repairScanner = { paths ->
+                    scanned += paths
+                    (index as? FakeIndex)?.let { fake ->
+                        val gone = paths.filterNot { File(it).exists() }
+                        fake.known = fake.known.filterNot { known -> gone.any { known == it || known.startsWith("$it/") } }.toSet() +
+                            paths.filter { File(it).exists() }
+                    }
+                },
             ).also {
                 store.put("search", it)
                 it.configure(showHidden = false, accessGranted = granted)
