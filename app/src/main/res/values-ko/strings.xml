@@ -484,9 +484,6 @@
     <string name="duplicates_group">%1$d copies, %2$s each</string>
     <string name="duplicates_removed">%1$d removed; %2$d could not be removed. %3$s</string>
     <string name="duplicates_operation_busy">Wait for the current file operation to finish, then try again.</string>
-    <string name="category_scope">마운트된 공유 저장소에 있는 파일. 앱 전용 저장소 및 문서 제공자 권한은 검사하지 않습니다.</string>
-    <string name="category_hidden_included">숨겨진 파일 포함(설정).</string>
-    <string name="category_hidden_excluded">숨겨진 파일 제외(설정).</string>
     <string name="category_pending">스캔되지 않음</string>
     <string name="category_scanning">스캐닝</string>
     <string name="category_complete">스캔 완료</string>
@@ -495,10 +492,6 @@
     <string name="category_limited">결과 제한에 도달했습니다. 처음 50,000개의 경기만 표시합니다. 전체 결과가 아닐 수 있습니다.</string>
     <string name="category_failed">스캔에 실패했습니다. 새로 고침하여 다시 시도하세요. 결과가 불완전합니다.</string>
     <string name="category_permission_required">카테고리를 스캔하려면 전체 저장소 접근 권한이 필요합니다.</string>
-    <string name="category_results">일치 항목: %1$d · 오래된 항목 제거됨: %2$d</string>
-    <string name="category_coverage_counts">확인된 파일 수: %1$d · 접근할 수 없는 항목 수: %2$d · 건너뛴 항목 수: %3$d</string>
-    <string name="category_skipped_explanation">방문 횟수는 방문한 항목만 나타냅니다. 건너뛴 항목에는 제외된 숨겨진 폴더, 링크, 중복된 루트, 특수 파일 및 128단계보다 깊은 폴더가 포함됩니다. 건너뛰었거나 접근할 수 없는 폴더의 내용은 알 수 없습니다.</string>
-    <string name="category_stale_file">이 파일은 변경되었거나 더 이상 접근할 수 없습니다. 카테고리를 새로고침하고 다시 시도하세요.</string>
     <string name="root_title">Root access</string>
     <string name="root_open">Open root session</string>
     <string name="root_warning">Allow Voyager to request superuser access for this session? Changes under / can damage Android or other apps. Root operations bypass Trash. Tap a regular file to edit UTF-8 text up to 256 KiB. Close the session to stop root access.</string>

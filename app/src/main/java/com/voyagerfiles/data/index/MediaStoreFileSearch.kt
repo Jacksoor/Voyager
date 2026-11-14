@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import androidx.annotation.RequiresApi
 import com.voyagerfiles.data.model.FileItem
 import com.voyagerfiles.data.model.FileSource
+import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.util.StorageVolumeInfo
 import java.io.File
 import java.util.Date
@@ -24,6 +25,9 @@ interface IndexedFileSource {
 
     /** Files and folders on [volumes] whose name contains every term of [query]. */
     fun search(query: String, volumes: List<StorageVolumeInfo>, showHidden: Boolean): List<FileItem>
+
+    /** Every file (or folder, for [FileTypeFilter.FOLDERS]) of [type] on [volumes]: Quick Access. */
+    fun ofType(type: FileTypeFilter, volumes: List<StorageVolumeInfo>, showHidden: Boolean): List<FileItem>
 
     /** Every path it knows on [volumes], to compare with a walk. */
     fun allPaths(volumes: List<StorageVolumeInfo>): Set<String>
@@ -51,13 +55,22 @@ class MediaStoreFileSearch(private val context: Context) : IndexedFileSource {
     override fun search(query: String, volumes: List<StorageVolumeInfo>, showHidden: Boolean): List<FileItem> {
         val terms = SearchTerms.parse(query)
         if (terms.isEmpty()) return emptyList()
-        val roots = volumes.mapNotNull { it.path?.trimEnd('/') }
         // The selection can only return too many rows; the exact check below drops the extra ones.
         val clauses = terms.map { SearchTerms.selection(MediaStore.Files.FileColumns.DISPLAY_NAME, it) }
         val args = Bundle().apply {
             putString(ContentResolver.QUERY_ARG_SQL_SELECTION, clauses.joinToString(" AND ") { it.first })
             putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, clauses.flatMap { it.second.asList() }.toTypedArray())
         }
+        return rows(args, volumes, showHidden) { SearchTerms.matches(it.name, terms) }
+    }
+
+    // All rows, filtered by the same type rules as the walker; MediaStore's own media types
+    // differ in places (e.g. which extensions count as documents).
+    override fun ofType(type: FileTypeFilter, volumes: List<StorageVolumeInfo>, showHidden: Boolean): List<FileItem> =
+        rows(Bundle(), volumes, showHidden, type::matches)
+
+    private fun rows(args: Bundle, volumes: List<StorageVolumeInfo>, showHidden: Boolean, keep: (FileItem) -> Boolean): List<FileItem> {
+        val roots = volumes.mapNotNull { it.path?.trimEnd('/') }
         val results = mutableListOf<FileItem>()
         resolver.query(uri, PROJECTION, args, null)?.use { c ->
             val data = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATA)
@@ -69,11 +82,10 @@ class MediaStoreFileSearch(private val context: Context) : IndexedFileSource {
                 val path = c.getString(data) ?: continue
                 val root = roots.firstOrNull { path == it || path.startsWith("$it/") } ?: continue
                 val fileName = c.getString(name) ?: path.substringAfterLast('/')
-                if (!SearchTerms.matches(fileName, terms)) continue
                 val hidden = SearchTerms.isHiddenBelow(path, root)
                 if (hidden && !showHidden) continue
                 val isDirectory = c.getInt(format) == FORMAT_ASSOCIATION
-                results += FileItem(
+                val item = FileItem(
                     name = fileName,
                     path = path,
                     isDirectory = isDirectory,
@@ -82,6 +94,7 @@ class MediaStoreFileSearch(private val context: Context) : IndexedFileSource {
                     isHidden = hidden,
                     source = FileSource.LOCAL,
                 )
+                if (keep(item)) results += item
             }
         }
         return results

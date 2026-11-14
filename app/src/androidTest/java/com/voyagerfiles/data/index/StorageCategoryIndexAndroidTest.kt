@@ -9,7 +9,9 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import com.voyagerfiles.util.FileUtils
 import com.voyagerfiles.util.StorageVolumeInfo
-import com.voyagerfiles.viewmodel.StorageCategoryViewModel
+import com.voyagerfiles.data.model.FileTypeFilter
+import com.voyagerfiles.viewmodel.SearchPhase
+import com.voyagerfiles.viewmodel.StorageSearchViewModel
 import java.io.File
 import kotlinx.coroutines.flow.last
 import kotlinx.coroutines.flow.first
@@ -22,28 +24,31 @@ import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 class StorageCategoryIndexAndroidTest {
-    @Test fun liveMountedStorageScanAndViewModelHandleRemovalAndAccessLoss() = runBlocking {
+    /** Quick Access lists a type through the search: MediaStore, removal and loss of access. */
+    @Test fun liveMountedStorageListingHandlesRemovalAndAccessLoss() = runBlocking {
         assumeTrue("Live all-files access case requires Android 11 or later", Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         assumeTrue("Run with MANAGE_EXTERNAL_STORAGE allowed", Environment.isExternalStorageManager())
         val application = ApplicationProvider.getApplicationContext<Application>()
         val folder = File(Environment.getExternalStorageDirectory(), "VoyagerCategoryTest-${System.nanoTime()}")
-        val viewModel = StorageCategoryViewModel(application)
+        val viewModel = withContext(Dispatchers.Main) { StorageSearchViewModel(application, preferences = null) }
         assertTrue(folder.mkdirs())
         try {
             val source = File(folder, "unique-category-fixture.jpg").apply { writeText("fixture") }
-            withContext(Dispatchers.Main) { viewModel.refresh(StorageCategory.IMAGES, false, true) }
-            val found = withTimeout(30_000) { viewModel.state.first { state -> state.files.any { it.path == source.canonicalPath } } }
-            val result = found.files.first { it.path == source.canonicalPath }
             withContext(Dispatchers.Main) {
-                viewModel.cancel()
+                viewModel.configure(showHidden = false, accessGranted = true)
+                viewModel.setTypeFilter(FileTypeFilter.IMAGES)
+            }
+            val found = withTimeout(30_000) { viewModel.state.first { state -> state.shown.any { it.path == source.canonicalPath } } }
+            val result = found.shown.first { it.path == source.canonicalPath }
+            withContext(Dispatchers.Main) {
                 assertTrue(viewModel.validate(result))
                 assertTrue(source.delete())
                 assertFalse(viewModel.validate(result))
                 assertEquals(1, viewModel.state.value.staleEntries)
-                assertTrue(viewModel.state.value.files.none { it.path == result.path })
-                viewModel.refresh(StorageCategory.IMAGES, false, false)
-                assertEquals(CategoryScanStatus.DENIED, viewModel.state.value.status)
-                assertTrue(viewModel.state.value.files.isEmpty())
+                assertTrue(viewModel.state.value.shown.none { it.path == result.path })
+                viewModel.configure(showHidden = false, accessGranted = false)
+                assertEquals(SearchPhase.DENIED, viewModel.state.value.phase)
+                assertTrue(viewModel.state.value.shown.isEmpty())
             }
         } finally {
             withContext(Dispatchers.Main) { viewModel.cancel() }

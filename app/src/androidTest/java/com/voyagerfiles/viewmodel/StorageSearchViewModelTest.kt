@@ -9,6 +9,7 @@ import com.voyagerfiles.data.index.SearchTerms
 import com.voyagerfiles.data.index.StorageCategoryIndex
 import com.voyagerfiles.data.model.FileItem
 import com.voyagerfiles.data.model.FileTypeFilter
+import com.voyagerfiles.data.model.SortOrder
 import com.voyagerfiles.util.StorageVolumeInfo
 import java.io.File
 import java.util.Date
@@ -42,6 +43,10 @@ class StorageSearchViewModelTest {
             return known.map(::File).filter { it.exists() && SearchTerms.matches(it.name, terms) }
                 .map { FileItem(it.name, it.path, it.isDirectory, it.length(), Date(it.lastModified())) }
         }
+        override fun ofType(type: FileTypeFilter, volumes: List<StorageVolumeInfo>, showHidden: Boolean): List<FileItem> =
+            known.map(::File).filter { it.exists() }
+                .map { FileItem(it.name, it.path, it.isDirectory, it.length(), Date(it.lastModified())) }
+                .filter(type::matches)
         override fun allPaths(volumes: List<StorageVolumeInfo>) = known
     }
 
@@ -148,6 +153,42 @@ class StorageSearchViewModelTest {
         await(model) { it.shown.size == 1 }
         assertEquals(listOf("alpha-folder"), model.state.value.shown.map { it.name })
         assertEquals(2, model.state.value.results.size)
+    }
+
+    @Test
+    fun aTypeWithoutAQueryIsListedInFullAndSortedLikeQuickAccess() = runBlocking {
+        root.resolve("b-photo.jpg").writeText("b")
+        root.resolve("a-photo.jpg").writeText("a")
+        val model = model(FakeIndex(setOf(path("alpha.txt"), path("a-photo.jpg"), path("b-photo.jpg"))))
+        withContext(Dispatchers.Main) { model.setTypeFilter(FileTypeFilter.IMAGES) }
+        await(model) { it.phase == SearchPhase.DONE && it.browsedType == FileTypeFilter.IMAGES }
+        assertTrue(model.state.value.browsing)
+        assertEquals(listOf("a-photo.jpg", "b-photo.jpg"), model.state.value.shown.map { it.name })
+
+        withContext(Dispatchers.Main) { model.setSortOrder(SortOrder.DESCENDING) }
+        await(model) { state -> state.shown.map { it.name } == listOf("b-photo.jpg", "a-photo.jpg") }
+
+        // Typing searches within the type; the results are ranked, not sorted.
+        withContext(Dispatchers.Main) { model.setQuery("photo") }
+        await(model) { it.searchedQuery == "photo" && it.phase == SearchPhase.DONE }
+        assertEquals(null, model.state.value.browsedType)
+        assertFalse(model.state.value.browsing)
+        // Back to no query: the type is listed again.
+        withContext(Dispatchers.Main) { model.setQuery("") }
+        await(model) { it.browsedType == FileTypeFilter.IMAGES && it.phase == SearchPhase.DONE }
+        withContext(Dispatchers.Main) { model.setTypeFilter(FileTypeFilter.ALL) }
+        await(model) { it.phase == SearchPhase.IDLE }
+    }
+
+    @Test
+    fun aListedTypeFindsItsUnindexedFilesOnRequest() = runBlocking {
+        val model = model(FakeIndex(setOf(path("alpha.txt"))))
+        withContext(Dispatchers.Main) { model.setTypeFilter(FileTypeFilter.IMAGES) }
+        await(model) { it.phase == SearchPhase.DONE && it.browsedType == FileTypeFilter.IMAGES }
+        assertTrue(model.state.value.shown.isEmpty())
+        withContext(Dispatchers.Main) { model.searchUnindexedNow() }
+        await(model) { it.phase == SearchPhase.DONE && it.searchedUnindexed }
+        assertEquals(listOf("alpha-sprite.png"), model.state.value.shown.map { it.name })
     }
 
     @Test

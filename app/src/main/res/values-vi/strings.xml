@@ -484,9 +484,6 @@
     <string name="duplicates_group">%1$d copies, %2$s each</string>
     <string name="duplicates_removed">%1$d removed; %2$d could not be removed. %3$s</string>
     <string name="duplicates_operation_busy">Wait for the current file operation to finish, then try again.</string>
-    <string name="category_scope">Các tập tin nằm rải rác trên bộ nhớ dùng chung đã được gắn kết. Bộ nhớ riêng của ứng dụng và quyền cấp phép nhà cung cấp tài liệu không được quét.</string>
-    <string name="category_hidden_included">Bao gồm các tệp ẩn (Cài đặt).</string>
-    <string name="category_hidden_excluded">Các tệp ẩn bị loại trừ (Cài đặt).</string>
     <string name="category_pending">Chưa được quét</string>
     <string name="category_scanning">Quét</string>
     <string name="category_complete">Quá trình quét hoàn tất</string>
@@ -495,10 +492,6 @@
     <string name="category_limited">Đã đạt giới hạn kết quả. Chỉ hiển thị 50.000 kết quả đầu tiên; phạm vi phủ sóng chưa đầy đủ.</string>
     <string name="category_failed">Quá trình quét thất bại. Vui lòng làm mới trang để thử lại; kết quả chưa đầy đủ.</string>
     <string name="category_permission_required">Cần có quyền truy cập đầy đủ vào bộ nhớ để quét các danh mục.</string>
-    <string name="category_results">Kết quả phù hợp: %1$d · Các mục cũ đã bị xóa: %2$d</string>
-    <string name="category_coverage_counts">Các tập tin đã kiểm tra: %1$d · Các mục không thể truy cập: %2$d · Các mục đã bỏ qua: %3$d</string>
-    <string name="category_skipped_explanation">Số liệu thống kê chỉ thể hiện các mục đã truy cập. Các mục bị bỏ qua bao gồm các thư mục ẩn, liên kết, thư mục gốc trùng lặp, tệp đặc biệt và thư mục sâu hơn 128 cấp. Nội dung của các thư mục bị bỏ qua hoặc không thể truy cập không được biết.</string>
-    <string name="category_stale_file">Tệp này đã thay đổi hoặc không còn truy cập được nữa. Vui lòng làm mới danh mục và thử lại.</string>
     <string name="root_title">Root access</string>
     <string name="root_open">Open root session</string>
     <string name="root_warning">Allow Voyager to request superuser access for this session? Changes under / can damage Android or other apps. Root operations bypass Trash. Tap a regular file to edit UTF-8 text up to 256 KiB. Close the session to stop root access.</string>

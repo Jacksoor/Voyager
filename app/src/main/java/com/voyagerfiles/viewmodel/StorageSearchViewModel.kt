@@ -17,6 +17,10 @@ import com.voyagerfiles.data.index.SearchTerms
 import com.voyagerfiles.data.index.StorageCategoryIndex
 import com.voyagerfiles.data.local.PreferencesManager
 import com.voyagerfiles.data.model.FileItem
+import kotlinx.coroutines.flow.distinctUntilChanged
+import com.voyagerfiles.data.model.SortOrder
+import com.voyagerfiles.data.model.SortBy
+import com.voyagerfiles.data.model.CategorySort
 import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.util.FileUtils
 import com.voyagerfiles.util.StorageVolumeInfo
@@ -69,7 +73,14 @@ data class StorageSearchState(
     /** Paths sent to the media scanner after the last full walk. */
     val repairedEntries: Int = 0,
     val volumes: List<StorageVolumeInfo> = emptyList(),
+    /** How a type is listed without a query (Quick Access); shared with the old category screen's setting. */
+    val sort: CategorySort = CategorySort(),
+    /** The type [results] list when they come from browsing a type instead of a query. */
+    val browsedType: FileTypeFilter? = null,
 ) {
+    /** A type chip without a query lists every file of that type, sorted by [sort]. */
+    val browsing: Boolean get() = query.isBlank() && typeFilter != FileTypeFilter.ALL
+
     val busy: Boolean get() = phase == SearchPhase.SEARCHING || phase == SearchPhase.WALKING
 }
 
@@ -94,7 +105,12 @@ class StorageSearchViewModel @JvmOverloads constructor(
     private val repairScanner: suspend (List<String>) -> Unit = { MediaStoreRepair.scan(application, it) },
 ) : AndroidViewModel(application) {
     private val _state = MutableStateFlow(
-        StorageSearchState(query = savedState.get<String>(QUERY_KEY).orEmpty(), hasIndex = index != null),
+        StorageSearchState(
+            query = savedState.get<String>(QUERY_KEY).orEmpty(),
+            typeFilter = savedState.get<String>(TYPE_KEY)?.let { name -> FileTypeFilter.entries.firstOrNull { it.name == name } }
+                ?: FileTypeFilter.ALL,
+            hasIndex = index != null,
+        ),
     )
     val state = _state.asStateFlow()
 
@@ -114,6 +130,37 @@ class StorageSearchViewModel @JvmOverloads constructor(
             _state.update {
                 it.copy(searchUnindexed = prefs.searchUnindexed.first(), repairMediaIndex = prefs.searchRepairMediaIndex.first())
             }
+        }
+        viewModelScope.launch {
+            preferences?.categorySort?.distinctUntilChanged()?.collect { sort ->
+                _state.update { it.copy(sort = sort) }
+                resort()
+            }
+        }
+    }
+
+    fun setSortBy(by: SortBy) {
+        _state.update { it.copy(sort = it.sort.copy(by = by)) }
+        resort()
+        viewModelScope.launch { preferences?.setCategorySortBy(by) }
+    }
+
+    fun setSortOrder(order: SortOrder) {
+        _state.update { it.copy(sort = it.sort.copy(order = order)) }
+        resort()
+        viewModelScope.launch { preferences?.setCategorySortOrder(order) }
+    }
+
+    private var sortJob: Job? = null
+
+    /** A listed type is ordered by the chosen sort; query results keep their ranking. */
+    private fun resort() {
+        if (_state.value.browsedType == null) return
+        sortJob?.cancel()
+        sortJob = viewModelScope.launch {
+            val results = ranked("")
+            _state.update { if (it.browsedType != null) it.withResults(results) else it }
+            refilterIfStale(results)
         }
     }
 
@@ -145,9 +192,16 @@ class StorageSearchViewModel @JvmOverloads constructor(
         }
     }
 
+    /** Without a query, a type is listed in full (Quick Access); with one, it narrows the results. */
     fun setTypeFilter(filter: FileTypeFilter) {
         _state.update { it.copy(typeFilter = filter) }
-        refilter()
+        savedState[TYPE_KEY] = filter.name
+        if (SearchTerms.parse(_state.value.query).isEmpty()) {
+            typingJob?.cancel()
+            search(_state.value.query, walkUnindexed = null)
+        } else {
+            refilter()
+        }
     }
 
     private var filterJob: Job? = null
@@ -170,11 +224,14 @@ class StorageSearchViewModel @JvmOverloads constructor(
         val indexed = indexedResults
         val walked = walkedResults
         val filter = _state.value.typeFilter
+        val sort = _state.value.sort
         return withContext(Dispatchers.Default) {
             val byPath = LinkedHashMap<String, FileItem>(indexed.size + walked.size)
             indexed.forEach { byPath[it.path] = it }
             walked.forEach { byPath.putIfAbsent(it.path, it) }
-            val all = SearchTerms.rank(byPath.values.toList(), query)
+            val merged = byPath.values.toList()
+            // A listed type has no query to rank by.
+            val all = if (SearchTerms.parse(query).isEmpty()) sort.applyTo(merged) else SearchTerms.rank(merged, query)
             Ranked(all, all.filter(filter::matches), filter)
         }
     }
@@ -193,7 +250,8 @@ class StorageSearchViewModel @JvmOverloads constructor(
     fun setSearchUnindexed(enabled: Boolean) {
         _state.update { it.copy(searchUnindexed = enabled) }
         viewModelScope.launch { preferences?.setSearchUnindexed(enabled) }
-        if (enabled && !_state.value.searchedUnindexed && _state.value.searchedQuery.isNotBlank()) searchUnindexedNow()
+        val shown = _state.value.searchedQuery.isNotBlank() || _state.value.browsedType != null
+        if (enabled && !_state.value.searchedUnindexed && shown) searchUnindexedNow()
     }
 
     fun setRepairMediaIndex(enabled: Boolean) {
@@ -208,13 +266,14 @@ class StorageSearchViewModel @JvmOverloads constructor(
      */
     fun onReturn() {
         val query = _state.value.searchedQuery
-        if (query.isBlank() || _state.value.busy || !accessGranted || !permissionGranted()) return
+        val browsed = _state.value.browsedType
+        if ((query.isBlank() && browsed == null) || _state.value.busy || !accessGranted || !permissionGranted()) return
         val request = ++generation
         searchJob = viewModelScope.launch {
             try {
                 val volumes = withContext(Dispatchers.IO) { volumeProvider().filter { it.isAvailable } }
                 val indexedVolumes = withContext(Dispatchers.IO) { coveredVolumes(volumes) }
-                val indexed = withContext(Dispatchers.IO) { index?.search(query, indexedVolumes, showHidden).orEmpty() }
+                val indexed = withContext(Dispatchers.IO) { indexed(query, browsed, indexedVolumes) }
                 val walked = withContext(Dispatchers.IO) { walkedResults.filter { File(it.path).exists() } }
                 if (request != generation) return@launch
                 indexedResults = indexed
@@ -278,27 +337,31 @@ class StorageSearchViewModel @JvmOverloads constructor(
             _state.update { it.copy(searchedQuery = query, results = emptyList(), shown = emptyList(), phase = SearchPhase.DENIED) }
             return
         }
-        // Only separators ("-", "_") is nothing to search for.
-        if (SearchTerms.parse(query).isEmpty()) {
+        // Only separators ("-", "_") is no query: a chosen type is listed in full, else nothing.
+        val browsed = _state.value.typeFilter.takeIf { SearchTerms.parse(query).isEmpty() && it != FileTypeFilter.ALL }
+        if (SearchTerms.parse(query).isEmpty() && browsed == null) {
             indexedResults = emptyList()
             walkedResults = emptyList()
+            shownKey = null
             _state.update {
-                it.copy(searchedQuery = "", results = emptyList(), shown = emptyList(), phase = SearchPhase.IDLE, searchedUnindexed = false,
-                    incomplete = false, inaccessibleFolders = 0, staleEntries = 0, repairedEntries = 0)
+                it.copy(searchedQuery = "", browsedType = null, results = emptyList(), shown = emptyList(), phase = SearchPhase.IDLE,
+                    searchedUnindexed = false, incomplete = false, inaccessibleFolders = 0, staleEntries = 0, repairedEntries = 0)
             }
             return
         }
         val walkIndexed = walkUnindexed ?: _state.value.searchUnindexed
-        val sameQuery = query == _state.value.searchedQuery
+        val key = browsed?.let { "type:${it.name}" } ?: "query:$query"
+        val sameQuery = key == shownKey
         _state.update { it.copy(phase = SearchPhase.SEARCHING) }
         searchJob = viewModelScope.launch {
             try {
                 val volumes = withContext(Dispatchers.IO) { volumeProvider().filter { it.isAvailable } }
                 val indexedVolumes = withContext(Dispatchers.IO) { coveredVolumes(volumes) }
                 val otherVolumes = volumes - indexedVolumes.toSet()
-                val indexed = withContext(Dispatchers.IO) { index?.search(query, indexedVolumes, showHidden).orEmpty() }
+                val indexed = withContext(Dispatchers.IO) { indexed(query, browsed, indexedVolumes) }
                 if (request != generation) return@launch
                 indexedResults = indexed
+                shownKey = key
                 // A new walk of the same query keeps what the last one found until it has more.
                 if (!sameQuery) walkedResults = emptyList()
                 val walkVolumes = otherVolumes + if (walkIndexed) indexedVolumes else emptyList()
@@ -306,7 +369,8 @@ class StorageSearchViewModel @JvmOverloads constructor(
                 if (request != generation) return@launch
                 _state.update {
                     it.withResults(results).copy(
-                        searchedQuery = query,
+                        searchedQuery = if (browsed != null) "" else query,
+                        browsedType = browsed,
                         phase = if (walkVolumes.isEmpty()) SearchPhase.DONE else SearchPhase.WALKING,
                         // Without an index (or on volumes it doesn't cover) the walk covers everything.
                         searchedUnindexed = walkIndexed || indexedVolumes.isEmpty(),
@@ -319,7 +383,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
                 }
                 refilterIfStale(results)
                 if (walkVolumes.isEmpty()) return@launch
-                walk(request, query, walkVolumes, repair = walkIndexed && _state.value.repairMediaIndex, indexedVolumes)
+                walk(request, query, browsed, walkVolumes, repair = walkIndexed && _state.value.repairMediaIndex, indexedVolumes)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
@@ -333,6 +397,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
     private suspend fun walk(
         request: Long,
         query: String,
+        browsed: FileTypeFilter?,
         volumes: List<StorageVolumeInfo>,
         repair: Boolean,
         indexedVolumes: List<StorageVolumeInfo>,
@@ -356,7 +421,9 @@ class StorageSearchViewModel @JvmOverloads constructor(
             if (isDirectory) visitedDirs += volumePath(path) else visitedFiles += volumePath(path)
         } else null
         var last: com.voyagerfiles.data.index.CategoryIndexState? = null
-        walker.search(query, volumes, walkHidden, onVisit, permissionGranted).collect { result ->
+        val walk = if (browsed != null) walker.scanType(browsed, volumes, walkHidden, onVisit, permissionGranted)
+            else walker.search(query, volumes, walkHidden, onVisit, permissionGranted)
+        walk.collect { result ->
             if (request != generation) return@collect
             last = result
             if (result.status == CategoryScanStatus.DENIED) {
@@ -408,6 +475,14 @@ class StorageSearchViewModel @JvmOverloads constructor(
         }
     }
 
+    /** What the shown results are for: a query or a listed type; null before anything is shown. */
+    private var shownKey: String? = null
+
+    private fun indexed(query: String, browsed: FileTypeFilter?, volumes: List<StorageVolumeInfo>): List<FileItem> {
+        val source = index ?: return emptyList()
+        return if (browsed != null) source.ofType(browsed, volumes, showHidden) else source.search(query, volumes, showHidden)
+    }
+
     private fun coveredVolumes(volumes: List<StorageVolumeInfo>): List<StorageVolumeInfo> =
         index?.let { source -> volumes.filter { runCatching { source.covers(it) }.getOrDefault(false) } }.orEmpty()
 
@@ -418,6 +493,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
 
     private companion object {
         const val QUERY_KEY = "query"
+        const val TYPE_KEY = "type"
         const val TYPING_PAUSE_MS = 150L
     }
 }

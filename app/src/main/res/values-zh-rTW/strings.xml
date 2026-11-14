@@ -481,9 +481,6 @@
     <string name="duplicates_group">%1$d copies, %2$s each</string>
     <string name="duplicates_removed">%1$d removed; %2$d could not be removed. %3$s</string>
     <string name="duplicates_operation_busy">Wait for the current file operation to finish, then try again.</string>
-    <string name="category_scope">掃描已掛載共用儲存空間中的檔案。不掃描應用程式私有儲存空間或透過文件提供者授權的目錄。</string>
-    <string name="category_hidden_included">包含隱藏檔案（設定）。</string>
-    <string name="category_hidden_excluded">已排除隱藏檔案（設定）。</string>
     <string name="category_pending">未掃描</string>
     <string name="category_scanning">掃描</string>
     <string name="category_complete">掃描完成</string>
@@ -492,10 +489,6 @@
     <string name="category_limited">結果已達上限。僅顯示前 50,000 條結果；覆蓋範圍不完整。</string>
     <string name="category_failed">掃描失敗。請刷新頁面重試；結果不完整。</string>
     <string name="category_permission_required">需要完全儲存存取權限才能掃描類別。</string>
-    <string name="category_results">符合項目： %1$d · 已移除過期條目： %2$d</string>
-    <string name="category_coverage_counts">檢查的檔案： %1$d · 無法存取的檔案： %2$d · 已跳過的檔案： %3$d</string>
-    <string name="category_skipped_explanation">計數僅反映已存取的條目。跳過的條目包括已排除的隱藏資料夾、連結、重複根目錄、特殊檔案以及深度超過 128 層的資料夾。跳過或無法存取的資料夾的內容未知。</string>
-    <string name="category_stale_file">此文件已更改或無法存取。請刷新類別並重試。</string>
     <string name="root_title">Root access</string>
     <string name="root_open">Open root session</string>
     <string name="root_warning">Allow Voyager to request superuser access for this session? Changes under / can damage Android or other apps. Root operations bypass Trash. Tap a regular file to edit UTF-8 text up to 256 KiB. Close the session to stop root access.</string>

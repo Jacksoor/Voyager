@@ -30,12 +30,16 @@ import androidx.test.core.app.ApplicationProvider
 import com.voyagerfiles.data.index.IndexedFileSource
 import com.voyagerfiles.data.index.SearchTerms
 import com.voyagerfiles.data.model.FileItem
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.isSelected
+import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.data.model.FileSource
 import com.voyagerfiles.util.StorageVolumeInfo
 import com.voyagerfiles.viewmodel.FileBrowserViewModel
 import com.voyagerfiles.viewmodel.StorageSearchViewModel
 import com.voyagerfiles.viewmodel.SearchPhase
 import java.util.Date
+import kotlinx.coroutines.flow.first
 import androidx.compose.ui.test.hasTestTag
 import java.io.File
 import java.util.UUID
@@ -118,6 +122,40 @@ class StorageSearchScreenTest {
         compose.runOnIdle { assertNull(opened) }
         compose.onNodeWithContentDescription("Open folder for ${removed.path}").assertDoesNotExist()
         compose.onNodeWithText("This item changed or is no longer accessible. Search again.").assertIsDisplayed()
+    }
+
+    @Test
+    fun aTypeChipWithoutAQueryListsTheTypeWithASortMenu() {
+        root.resolve("one/photo.jpg").writeText("jpg")
+        val model = searchModel()
+        showSearch(model) {}
+        compose.onNodeWithContentDescription("Sort").assertDoesNotExist()
+        compose.onNodeWithText("Images").performClick()
+        compose.waitUntil(10_000) { model.state.value.browsedType == FileTypeFilter.IMAGES && model.state.value.phase == SearchPhase.DONE }
+        compose.onNodeWithText("photo.jpg").assertIsDisplayed()
+        compose.onNodeWithContentDescription("Sort").assertIsDisplayed()
+        type("photo")
+        compose.waitUntil(10_000) { model.state.value.searchedQuery == "photo" }
+        compose.onNodeWithContentDescription("Sort").assertDoesNotExist()
+    }
+
+    @Test
+    fun aQuickAccessTileOpensTheSearchWithItsTypeAndOffersPermissionRecovery() {
+        val preferences = com.voyagerfiles.data.local.PreferencesManager(application)
+        val previous = kotlinx.coroutines.runBlocking { preferences.homeLayout.first() }
+        try {
+            kotlinx.coroutines.runBlocking { preferences.setHomeLayout(com.voyagerfiles.data.model.HomeLayout.DEFAULT) }
+            val browser = browserModel()
+            compose.setContent { MaterialTheme { AppNavigation(browser, false, onRequestAllFilesAccess = {}) } }
+            compose.waitUntil(10_000) { browser.homeLayout.value != null }
+            compose.onNodeWithText("Apps").performScrollTo().performClick()
+            compose.onNodeWithText("Full storage access is required to search shared storage.").assertIsDisplayed()
+            compose.onNode(hasText("Apps") and isSelected()).assertExists()
+            compose.onNodeWithContentDescription("Back").performClick()
+            compose.onNodeWithText("Quick Access").assertExists()
+        } finally {
+            kotlinx.coroutines.runBlocking { preferences.setHomeLayout(previous) }
+        }
     }
 
     @Test
@@ -224,6 +262,10 @@ class StorageSearchScreenTest {
                 return root.walkTopDown().drop(1).filter { SearchTerms.matches(it.name, terms) }
                     .map { FileItem(it.name, it.canonicalPath, it.isDirectory, it.length(), Date(it.lastModified())) }.toList()
             }
+            override fun ofType(type: FileTypeFilter, volumes: List<StorageVolumeInfo>, showHidden: Boolean): List<FileItem> =
+                root.walkTopDown().drop(1)
+                    .map { FileItem(it.name, it.canonicalPath, it.isDirectory, it.length(), Date(it.lastModified())) }
+                    .filter(type::matches).toList()
             override fun allPaths(volumes: List<StorageVolumeInfo>) =
                 root.walkTopDown().drop(1).mapTo(HashSet()) { it.canonicalPath }
         }

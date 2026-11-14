@@ -80,6 +80,9 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.voyagerfiles.R
 import com.voyagerfiles.data.model.FileItem
 import com.voyagerfiles.data.model.FileTypeFilter
+import com.voyagerfiles.data.model.SortOrder
+import com.voyagerfiles.data.model.SortBy
+import com.voyagerfiles.ui.components.FileSortMenu
 import com.voyagerfiles.ui.components.FileThumbnailOrIcon
 import com.voyagerfiles.util.FileUtils
 import com.voyagerfiles.util.StorageVolumeInfo
@@ -104,6 +107,9 @@ fun StorageSearchScreen(
     searchViewModel: StorageSearchViewModel = viewModel(),
     requestedQuery: String? = null,
     onRequestedQueryConsumed: () -> Unit = {},
+    /** Opens with this type listed (a Quick Access tile on Home). */
+    requestedType: FileTypeFilter? = null,
+    onRequestedTypeConsumed: () -> Unit = {},
 ) {
     val state by searchViewModel.state.collectAsState()
     val context = LocalContext.current
@@ -112,6 +118,12 @@ fun StorageSearchScreen(
     val snackbar = remember { SnackbarHostState() }
     val keyboard = LocalSoftwareKeyboardController.current
     LaunchedEffect(showHidden, hasAllFilesAccess) { searchViewModel.configure(showHidden, hasAllFilesAccess) }
+    LaunchedEffect(requestedType) {
+        if (requestedType != null) {
+            searchViewModel.setTypeFilter(requestedType)
+            onRequestedTypeConsumed()
+        }
+    }
     LaunchedEffect(requestedQuery) {
         if (requestedQuery != null) {
             searchViewModel.setQuery(requestedQuery)
@@ -161,6 +173,8 @@ fun StorageSearchScreen(
             searchViewModel.submit()
         },
         onTypeFilterChange = searchViewModel::setTypeFilter,
+        onSortByChange = searchViewModel::setSortBy,
+        onSortOrderChange = searchViewModel::setSortOrder,
         onSearchUnindexed = searchViewModel::searchUnindexedNow,
         onSearchUnindexedEveryTimeChange = searchViewModel::setSearchUnindexed,
         onRepairMediaIndexChange = searchViewModel::setRepairMediaIndex,
@@ -180,6 +194,8 @@ internal fun StorageSearchContent(
     onQueryChange: (String) -> Unit,
     onSubmit: () -> Unit,
     onTypeFilterChange: (FileTypeFilter) -> Unit,
+    onSortByChange: (SortBy) -> Unit,
+    onSortOrderChange: (SortOrder) -> Unit,
     onSearchUnindexed: () -> Unit,
     onSearchUnindexedEveryTimeChange: (Boolean) -> Unit,
     onRepairMediaIndexChange: (Boolean) -> Unit,
@@ -238,7 +254,11 @@ internal fun StorageSearchContent(
                         ),
                     )
                 },
-                actions = { SearchOptionsMenu(state, onSearchUnindexedEveryTimeChange, onRepairMediaIndexChange) },
+                actions = {
+                    // A listed type (no query) is sorted like a folder; query results are ranked.
+                    if (state.browsing) FileSortMenu(state.sort.by, state.sort.order, onSortByChange, onSortOrderChange)
+                    SearchOptionsMenu(state, onSearchUnindexedEveryTimeChange, onRepairMediaIndexChange)
+                },
             )
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -264,7 +284,7 @@ internal fun StorageSearchContent(
                 state.phase == SearchPhase.DENIED -> Message(stringResource(R.string.search_permission_required)) {
                     TextButton(onClick = onRequestAllFilesAccess) { Text(stringResource(R.string.permission_grant_full_access)) }
                 }
-                state.searchedQuery.isEmpty() && state.phase != SearchPhase.SEARCHING ->
+                state.searchedQuery.isEmpty() && state.browsedType == null && state.phase != SearchPhase.SEARCHING ->
                     Message(stringResource(R.string.search_idle_hint))
                 else -> LazyColumn(Modifier.weight(1f).testTag(STORAGE_SEARCH_RESULTS_TAG), state = listState) {
                     val shown = state.shown

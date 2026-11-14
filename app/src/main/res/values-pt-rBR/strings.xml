@@ -496,9 +496,6 @@
     <string name="duplicates_group">%1$d copies, %2$s each</string>
     <string name="duplicates_removed">%1$d removed; %2$d could not be removed. %3$s</string>
     <string name="duplicates_operation_busy">Wait for the current file operation to finish, then try again.</string>
-    <string name="category_scope">Arquivos em armazenamento compartilhado montado. O armazenamento privado do aplicativo e as concessões do provedor de documentos não são verificados.</string>
-    <string name="category_hidden_included">Arquivos ocultos incluídos (Configurações).</string>
-    <string name="category_hidden_excluded">Arquivos ocultos excluídos (Configurações).</string>
     <string name="category_pending">Não digitalizado</string>
     <string name="category_scanning">Digitalização</string>
     <string name="category_complete">Digitalização concluída</string>
@@ -507,10 +504,6 @@
     <string name="category_limited">Limite de resultados atingido. Exibindo os primeiros 50.000 resultados; a cobertura está incompleta.</string>
     <string name="category_failed">A verificação falhou. Atualize a página para tentar novamente; os resultados estão incompletos.</string>
     <string name="category_permission_required">É necessário acesso total ao armazenamento para analisar as categorias.</string>
-    <string name="category_results">Resultados: %1$d · Entradas antigas removidas: %2$d</string>
-    <string name="category_coverage_counts">Arquivos verificados: %1$d · Entradas inacessíveis: %2$d · Entradas ignoradas: %3$d</string>
-    <string name="category_skipped_explanation">As contagens descrevem apenas as entradas visitadas. As entradas ignoradas incluem pastas ocultas excluídas, links, raízes duplicadas, arquivos especiais e pastas com mais de 128 níveis de profundidade. O conteúdo das pastas ignoradas ou inacessíveis é desconhecido.</string>
-    <string name="category_stale_file">Este arquivo foi alterado ou não está mais acessível. Atualize a categoria e tente novamente.</string>
     <string name="root_title">Root access</string>
     <string name="root_open">Open root session</string>
     <string name="root_warning">Allow Voyager to request superuser access for this session? Changes under / can damage Android or other apps. Root operations bypass Trash. Tap a regular file to edit UTF-8 text up to 256 KiB. Close the session to stop root access.</string>
