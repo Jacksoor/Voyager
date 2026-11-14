@@ -59,6 +59,8 @@ fun FileListItem(
     trailingContent: (@Composable () -> Unit)? = null,
     isHighlighted: Boolean = false,
     remoteImages: RemoteImageThumbnailLoader? = null,
+    /** Where the file is ("Pictures › Holiday"), shown before its size and date: search results. */
+    location: String? = null,
 ) {
     val selectionContentDescription = stringResource(
         if (isSelected) R.string.content_desc_deselect_named else R.string.content_desc_select_named,
@@ -156,7 +158,16 @@ fun FileListItem(
                         overflow = TextOverflow.Ellipsis,
                         color = MaterialTheme.colorScheme.onSurface,
                     )
-                    Row(
+                    if (location != null) {
+                        Text(
+                            text = listOfNotNull(location, file.formattedSize.takeIf { !file.isDirectory }, formatDate(file.lastModified))
+                                .joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    } else Row(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         if (!file.isDirectory) {

@@ -1,21 +1,15 @@
 package com.voyagerfiles.ui.screens
 
 import android.content.ActivityNotFoundException
-import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -27,6 +21,10 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.MoreVert
+import com.voyagerfiles.ui.components.FileListItem
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.ui.platform.LocalConfiguration
+import android.content.res.Configuration
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -71,7 +69,6 @@ import androidx.compose.ui.semantics.toggleableState
 import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -83,7 +80,6 @@ import com.voyagerfiles.data.model.FileTypeFilter
 import com.voyagerfiles.data.model.SortOrder
 import com.voyagerfiles.data.model.SortBy
 import com.voyagerfiles.ui.components.FileSortMenu
-import com.voyagerfiles.ui.components.FileThumbnailOrIcon
 import com.voyagerfiles.util.FileUtils
 import com.voyagerfiles.util.StorageVolumeInfo
 import com.voyagerfiles.viewmodel.SearchPhase
@@ -185,6 +181,7 @@ fun StorageSearchScreen(
         onOpenLocation = { open(it, containingFolder = true) },
         // Quick Access opens a listed type: browsing, not typing, so no keyboard.
         focusOnOpen = requestedType == null,
+        onSearchAgain = searchViewModel::searchAgain,
     )
 }
 
@@ -207,6 +204,9 @@ internal fun StorageSearchContent(
     onOpenFile: (FileItem) -> Unit,
     onOpenLocation: (FileItem) -> Unit,
     focusOnOpen: Boolean = true,
+    onSearchAgain: () -> Unit = {},
+    isTelevision: Boolean =
+        LocalConfiguration.current.uiMode and Configuration.UI_MODE_TYPE_MASK == Configuration.UI_MODE_TYPE_TELEVISION,
 ) {
     val focus = remember { FocusRequester() }
     // The keyboard comes up once, on the first visit; not again after opening a result.
@@ -260,7 +260,7 @@ internal fun StorageSearchContent(
                 actions = {
                     // A listed type (no query) is sorted like a folder; query results are ranked.
                     if (state.browsing) FileSortMenu(state.sort.by, state.sort.order, onSortByChange, onSortOrderChange)
-                    SearchOptionsMenu(state, onSearchUnindexedEveryTimeChange, onRepairMediaIndexChange)
+                    SearchOptionsMenu(state, onSearchAgain, onSearchUnindexedEveryTimeChange, onRepairMediaIndexChange)
                 },
             )
         },
@@ -292,7 +292,7 @@ internal fun StorageSearchContent(
                 else -> LazyColumn(Modifier.weight(1f).testTag(STORAGE_SEARCH_RESULTS_TAG), state = listState) {
                     val shown = state.shown
                     items(shown, key = { it.path }) { file ->
-                        SearchResultRow(file, state.volumes, onClick = { onOpenFile(file) }, onOpenLocation = { onOpenLocation(file) })
+                        SearchResultRow(file, state.volumes, isTelevision, onClick = { onOpenFile(file) }, onOpenLocation = { onOpenLocation(file) })
                     }
                     item(key = "footer") { SearchFooter(state, shown.size, onSearchUnindexed, onCancel) }
                 }
@@ -304,19 +304,31 @@ internal fun StorageSearchContent(
 @Composable
 private fun SearchOptionsMenu(
     state: StorageSearchState,
+    onSearchAgain: () -> Unit,
     onSearchUnindexedEveryTimeChange: (Boolean) -> Unit,
     onRepairMediaIndexChange: (Boolean) -> Unit,
 ) {
-    if (!state.hasIndex) return
     var open by remember { mutableStateOf(false) }
     Box {
         IconButton(onClick = { open = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.content_desc_more)) }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
-            CheckItem(stringResource(R.string.search_unindexed_every_time), state.searchUnindexed) {
-                onSearchUnindexedEveryTimeChange(!state.searchUnindexed)
-            }
-            CheckItem(stringResource(R.string.search_repair_media_index), state.repairMediaIndex) {
-                onRepairMediaIndexChange(!state.repairMediaIndex)
+            // Runs the shown search again, with the unindexed folders if they were searched.
+            DropdownMenuItem(
+                text = { Text(stringResource(R.string.search_again)) },
+                leadingIcon = { Icon(Icons.Filled.Refresh, null) },
+                enabled = (state.searchedQuery.isNotEmpty() || state.browsedType != null) && !state.busy,
+                onClick = {
+                    open = false
+                    onSearchAgain()
+                },
+            )
+            if (state.hasIndex) {
+                CheckItem(stringResource(R.string.search_unindexed_every_time), state.searchUnindexed) {
+                    onSearchUnindexedEveryTimeChange(!state.searchUnindexed)
+                }
+                CheckItem(stringResource(R.string.search_repair_media_index), state.repairMediaIndex) {
+                    onRepairMediaIndexChange(!state.repairMediaIndex)
+                }
             }
         }
     }
@@ -347,34 +359,32 @@ private fun Message(text: String, action: @Composable () -> Unit = {}) {
     }
 }
 
-/** One result: its icon, name and the folder it is in; the trailing button opens that folder. */
-@OptIn(ExperimentalFoundationApi::class)
+/**
+ * One result: the browser's file row (icon, name, size, date, D-pad and remote handling) with the
+ * folder it is in; the trailing button opens that folder.
+ */
 @Composable
-private fun SearchResultRow(file: FileItem, volumes: List<StorageVolumeInfo>, onClick: () -> Unit, onOpenLocation: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .heightIn(min = 64.dp)
-            .combinedClickable(onClick = onClick, onLongClick = onOpenLocation)
-            .padding(start = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        FileThumbnailOrIcon(file = file, iconSize = 40.dp)
-        Spacer(Modifier.width(16.dp))
-        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-            Text(file.name, style = MaterialTheme.typography.bodyLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-            Text(
-                locationLabel(file.path, volumes),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        IconButton(onClick = onOpenLocation) {
-            Icon(Icons.Filled.FolderOpen, stringResource(R.string.content_desc_open_location_named, file.path))
-        }
-    }
+private fun SearchResultRow(
+    file: FileItem,
+    volumes: List<StorageVolumeInfo>,
+    isTelevision: Boolean,
+    onClick: () -> Unit,
+    onOpenLocation: () -> Unit,
+) {
+    FileListItem(
+        file = file,
+        isSelected = false,
+        isSelectionMode = false,
+        onClick = onClick,
+        onLongClick = onOpenLocation,
+        enableRemoteSelect = isTelevision,
+        location = locationLabel(file.path, volumes),
+        trailingContent = {
+            IconButton(onClick = onOpenLocation, modifier = Modifier.fillMaxSize()) {
+                Icon(Icons.Filled.FolderOpen, stringResource(R.string.content_desc_open_location_named, file.path))
+            }
+        },
+    )
 }
 
 /**
@@ -418,6 +428,10 @@ private fun SearchFooter(state: StorageSearchState, shownCount: Int, onSearchUni
             TextButton(onClick = onCancel) { Text(stringResource(R.string.action_cancel)) }
         }
         if (state.incomplete) Text(stringResource(R.string.search_incomplete), style = style, color = muted)
+        // A volume that is listed but not mounted (an SD card taken out) was not searched.
+        state.unavailableVolumes.forEach { name ->
+            Text(stringResource(R.string.search_volume_unavailable, name), style = style, color = muted, textAlign = TextAlign.Center)
+        }
         if (state.inaccessibleFolders > 0) {
             Text(pluralStringResource(R.plurals.search_inaccessible_folders, state.inaccessibleFolders, state.inaccessibleFolders), style = style, color = muted)
         }

@@ -75,6 +75,8 @@ data class StorageSearchState(
     val volumes: List<StorageVolumeInfo> = emptyList(),
     /** How a type is listed without a query (Quick Access); shared with the old category screen's setting. */
     val sort: CategorySort = CategorySort(),
+    /** Volumes that are listed but not mounted (an SD card taken out), so they weren't searched. */
+    val unavailableVolumes: List<String> = emptyList(),
     /** The type [results] list when they come from browsing a type instead of a query. */
     val browsedType: FileTypeFilter? = null,
 ) {
@@ -242,6 +244,12 @@ class StorageSearchViewModel @JvmOverloads constructor(
     private fun StorageSearchState.withResults(results: Ranked): StorageSearchState =
         copy(results = results.all, shown = results.shown)
 
+    /** Runs the shown search again, walking the unindexed folders again if they were searched. */
+    fun searchAgain() {
+        typingJob?.cancel()
+        search(_state.value.query, walkUnindexed = _state.value.searchedUnindexed)
+    }
+
     /** Walk the folders the index leaves out, for the shown query. */
     fun searchUnindexedNow() {
         search(_state.value.searchedQuery.ifBlank { _state.value.query }, walkUnindexed = true)
@@ -355,7 +363,9 @@ class StorageSearchViewModel @JvmOverloads constructor(
         _state.update { it.copy(phase = SearchPhase.SEARCHING) }
         searchJob = viewModelScope.launch {
             try {
-                val volumes = withContext(Dispatchers.IO) { volumeProvider().filter { it.isAvailable } }
+                val allVolumes = withContext(Dispatchers.IO) { volumeProvider() }
+                val volumes = allVolumes.filter { it.isAvailable }
+                val unavailable = allVolumes.filterNot { it.isAvailable }.map { it.description }
                 val indexedVolumes = withContext(Dispatchers.IO) { coveredVolumes(volumes) }
                 val otherVolumes = volumes - indexedVolumes.toSet()
                 val indexed = withContext(Dispatchers.IO) { indexed(query, browsed, indexedVolumes) }
@@ -379,6 +389,7 @@ class StorageSearchViewModel @JvmOverloads constructor(
                         staleEntries = if (sameQuery) it.staleEntries else 0,
                         repairedEntries = if (sameQuery) it.repairedEntries else 0,
                         volumes = volumes,
+                        unavailableVolumes = unavailable,
                     )
                 }
                 refilterIfStale(results)
