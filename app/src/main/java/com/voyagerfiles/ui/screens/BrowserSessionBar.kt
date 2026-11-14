@@ -33,36 +33,30 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Android
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.RocketLaunch
 import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.SdStorage
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.outlined.Android
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.RocketLaunch
-import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.filled.Security
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -76,7 +70,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.voyagerfiles.R
 import com.voyagerfiles.data.model.FileSource
-import com.voyagerfiles.data.model.isNetwork
 import com.voyagerfiles.viewmodel.BrowserSession
 
 internal const val SESSION_BAR_TEST_TAG = "session-bar"
@@ -279,6 +272,7 @@ internal fun BrowserSessionRail(
                         SessionBarSlot.Session(session), cell, activeSessionId, canPinMore,
                         onSelect, onClose, onSetPinned, onDisconnect, onReset, labelLines = 2,
                         onSetStartTab = onSetStartTab,
+                        menuBeside = true,
                     )
                 }
                 Spacer(Modifier.height(RAIL_GAP))
@@ -301,20 +295,26 @@ private fun SessionBarCell(
     onReset: (String) -> Unit,
     labelLines: Int = 1,
     onSetStartTab: (String, Boolean) -> Unit = { _, _ -> },
+    /** The rail: the menu opens beside the tab instead of above it. */
+    menuBeside: Boolean = false,
 ) {
     when (slot) {
         SessionBarSlot.Empty -> Spacer(cellModifier)
         is SessionBarSlot.Session -> {
             val session = slot.session
-            var menuOpen by remember { mutableStateOf(false) }
-            Box(modifier = cellModifier) {
+            val menu = remember { TabMenuState() }
+            val haptics = LocalHapticFeedback.current
+            Box(modifier = cellModifier.tabMenuDrag(menu, haptics)) {
                 BarItem(
                     icon = sessionIcon(session),
                     iconAlpha = sessionIconAlpha(session),
                     label = session.barLabel,
                     selected = session.id == activeSessionId,
                     onClick = { onSelect(session.id) },
-                    onLongClick = { menuOpen = true },
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        menu.open()
+                    },
                     pinned = session.pinned,
                     startTab = session.isStartTab,
                     sublabel = if (session.pinned && session.isAwayFromStart) "› ${session.label}" else null,
@@ -322,10 +322,10 @@ private fun SessionBarCell(
                     compact = labelLines == 1,
                     modifier = Modifier.fillMaxWidth().testTag(sessionBarItemTestTag(session.id)),
                 )
-                SessionMenu(
+                SessionTabMenu(
                     session = session,
-                    expanded = menuOpen,
-                    onDismiss = { menuOpen = false },
+                    state = menu,
+                    beside = menuBeside,
                     canPinMore = canPinMore,
                     onClose = onClose,
                     onSetPinned = onSetPinned,
@@ -334,107 +334,6 @@ private fun SessionBarCell(
                     onSetStartTab = onSetStartTab,
                 )
             }
-        }
-    }
-}
-
-/**
- * A session's long-press menu: pin, start tab, back to its start folder, disconnect and close.
- * The session bar, the rail and Home's session list all use it.
- */
-@Composable
-internal fun SessionMenu(
-    session: BrowserSession,
-    expanded: Boolean,
-    onDismiss: () -> Unit,
-    canPinMore: Boolean,
-    onClose: (String) -> Unit,
-    onSetPinned: (String, Boolean) -> Unit,
-    onDisconnect: (String) -> Unit,
-    onReset: (String) -> Unit,
-    onSetStartTab: (String, Boolean) -> Unit,
-) {
-    DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
-        Text(
-            if (session.pinned) {
-                stringResource(R.string.session_menu_pinned, session.startLabel, session.description)
-            } else {
-                session.description
-            },
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier
-                .width(240.dp)
-                .padding(horizontal = 12.dp, vertical = 8.dp),
-        )
-        if (session.canPin) {
-            DropdownMenuItem(
-                text = {
-                    Text(
-                        if (session.pinned) stringResource(R.string.action_unpin_session)
-                        else stringResource(R.string.action_pin_folder, session.label),
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        if (session.pinned) Icons.Outlined.PushPin else Icons.Filled.PushPin,
-                        contentDescription = null,
-                    )
-                },
-                // Unpinning always works; pinning only while the bar has a cell for it.
-                enabled = session.pinned || canPinMore,
-                onClick = {
-                    onDismiss()
-                    onSetPinned(session.id, !session.pinned)
-                },
-            )
-        }
-        if (session.canBeStartTab) {
-            DropdownMenuItem(
-                text = {
-                    Text(stringResource(if (session.isStartTab) R.string.action_unset_start_tab else R.string.action_set_start_tab))
-                },
-                leadingIcon = {
-                    Icon(if (session.isStartTab) Icons.Outlined.RocketLaunch else Icons.Filled.RocketLaunch, contentDescription = null)
-                },
-                onClick = {
-                    onDismiss()
-                    onSetStartTab(session.id, !session.isStartTab)
-                },
-            )
-        }
-        if (session.isAwayFromStart) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_reset_session, session.startLabel)) },
-                leadingIcon = { Icon(Icons.Filled.Restore, contentDescription = null) },
-                onClick = {
-                    onDismiss()
-                    onReset(session.id)
-                },
-            )
-        }
-        if (session.canDisconnect) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.action_disconnect)) },
-                leadingIcon = { Icon(Icons.Outlined.CloudOff, contentDescription = null) },
-                onClick = {
-                    onDismiss()
-                    onDisconnect(session.id)
-                },
-            )
-        }
-        // A pinned session is locked: unpin it first to close it.
-        if (!session.pinned) {
-            DropdownMenuItem(
-                text = { Text(stringResource(R.string.content_desc_close_session)) },
-                leadingIcon = { Icon(Icons.Filled.Close, contentDescription = null) },
-                onClick = {
-                    onDismiss()
-                    onClose(session.id)
-                },
-            )
         }
     }
 }
