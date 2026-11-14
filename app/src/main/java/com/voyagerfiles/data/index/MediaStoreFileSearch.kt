@@ -12,6 +12,8 @@ import com.voyagerfiles.data.model.FileSource
 import com.voyagerfiles.util.StorageVolumeInfo
 import java.io.File
 import java.util.Date
+import java.util.Locale
+import java.text.Normalizer
 
 /**
  * A source that already knows the files of some volumes, so searching them needs no walk.
@@ -50,15 +52,11 @@ class MediaStoreFileSearch(private val context: Context) : IndexedFileSource {
         val terms = SearchTerms.parse(query)
         if (terms.isEmpty()) return emptyList()
         val roots = volumes.mapNotNull { it.path?.trimEnd('/') }
-        val clauses = terms.filter(SearchTerms::isAscii)
+        // The selection can only return too many rows; the exact check below drops the extra ones.
+        val clauses = terms.map { SearchTerms.selection(MediaStore.Files.FileColumns.DISPLAY_NAME, it) }
         val args = Bundle().apply {
-            if (clauses.isNotEmpty()) {
-                putString(
-                    ContentResolver.QUERY_ARG_SQL_SELECTION,
-                    clauses.joinToString(" AND ") { "${MediaStore.Files.FileColumns.DISPLAY_NAME} LIKE ? ESCAPE '\\'" },
-                )
-                putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, clauses.map(SearchTerms::likePattern).toTypedArray())
-            }
+            putString(ContentResolver.QUERY_ARG_SQL_SELECTION, clauses.joinToString(" AND ") { it.first })
+            putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, clauses.flatMap { it.second.asList() }.toTypedArray())
         }
         val results = mutableListOf<FileItem>()
         resolver.query(uri, PROJECTION, args, null)?.use { c ->
@@ -71,7 +69,6 @@ class MediaStoreFileSearch(private val context: Context) : IndexedFileSource {
                 val path = c.getString(data) ?: continue
                 val root = roots.firstOrNull { path == it || path.startsWith("$it/") } ?: continue
                 val fileName = c.getString(name) ?: path.substringAfterLast('/')
-                // LIKE folds ASCII letters only; this also covers umlauts and the non-ASCII terms.
                 if (!SearchTerms.matches(fileName, terms)) continue
                 val hidden = SearchTerms.isHiddenBelow(path, root)
                 if (hidden && !showHidden) continue
@@ -117,17 +114,84 @@ class MediaStoreFileSearch(private val context: Context) : IndexedFileSource {
     }
 }
 
-/** How a search query matches names: every word, anywhere in the name, ignoring case. */
+/**
+ * How a search query matches names: every word, anywhere in the name, ignoring case, accents and
+ * separators. "cafe" finds "Café", "ubung" finds "Übung", "img2024" finds "IMG_2024.jpg".
+ */
 object SearchTerms {
-    fun parse(query: String): List<String> = query.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+    fun parse(query: String): List<String> = query.trim().split(Regex("\\s+")).filter { fold(it).isNotEmpty() }
 
-    fun matches(name: String, terms: List<String>): Boolean = terms.all { name.contains(it, ignoreCase = true) }
+    fun matches(name: String, terms: List<String>): Boolean {
+        val folded = fold(name)
+        return terms.all { folded.contains(fold(it)) }
+    }
 
-    fun isAscii(term: String): Boolean = term.all { it.code < 128 }
+    /**
+     * [text] lowercased, without accents (é → e, Ü → u) or separators (space, `.`, `_`, `-`), with
+     * the letters that don't decompose spelled out (ß → ss, æ → ae, œ → oe, ø → o, ł → l, đ → d).
+     * Plain ASCII, most names, skips the Unicode work.
+     */
+    fun fold(text: String): String {
+        val out = StringBuilder(text.length)
+        var ascii = true
+        for (c in text) {
+            when {
+                c.code >= 128 -> { ascii = false; break }
+                c.isSeparator() -> Unit
+                c in 'A'..'Z' -> out.append(c + 32)
+                else -> out.append(c)
+            }
+        }
+        if (ascii) return out.toString()
+        out.setLength(0)
+        val decomposed = Normalizer.normalize(text.lowercase(Locale.ROOT), Normalizer.Form.NFD)
+        for (c in decomposed) {
+            when {
+                Character.getType(c) == Character.NON_SPACING_MARK.toInt() -> Unit
+                c.isSeparator() -> Unit
+                else -> out.append(SPELLED_OUT[c] ?: c.toString())
+            }
+        }
+        return out.toString()
+    }
 
-    /** A LIKE pattern for [term] anywhere, with LIKE's own characters escaped by `\`. */
-    fun likePattern(term: String): String =
-        "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    /**
+     * Narrows the MediaStore rows to a superset of the names [term] [matches], before the exact
+     * check. ASCII names (most) must contain the term's characters in order, with anything (a
+     * separator) between them: LIKE folds ASCII case itself. Names with other characters must
+     * have the term's length in characters, roughly: every letter that may carry an accent stands
+     * for one character, and "ss", "ae", "oe" may be one letter (ß, æ, œ).
+     */
+    fun selection(column: String, term: String): Pair<String, Array<String>> =
+        "($column LIKE ? ESCAPE '\\' OR ($column GLOB ? AND $column LIKE ? ESCAPE '\\'))" to
+            arrayOf(plainPattern(term), NON_ASCII_GLOB, accentPattern(term))
+
+    /** The term's characters in order, anything between them: "img2024" finds "IMG_2024". */
+    fun plainPattern(term: String): String =
+        "%" + fold(term).map { escapeLike(it) }.joinToString("%") + "%"
+
+    /** Like [plainPattern], with each letter that may carry an accent, or isn't ASCII, as `_`. */
+    fun accentPattern(term: String): String {
+        val folded = fold(term)
+        val tokens = mutableListOf<String>()
+        var i = 0
+        while (i < folded.length) {
+            if (i + 1 < folded.length && folded.substring(i, i + 2) in SPELLED_PAIRS) {
+                tokens += ""
+                i += 2
+                continue
+            }
+            val c = folded[i]
+            tokens += if (c.code < 128 && (c.isDigit() || c in PLAIN_LETTERS || !c.isLetter())) escapeLike(c) else "_"
+            i++
+        }
+        return "%" + tokens.joinToString("%") + "%"
+    }
+
+    private fun escapeLike(c: Char): String = if (c == '%' || c == '_' || c == '\\') "\\$c" else c.toString()
+
+    /** A name with a character outside printable ASCII. */
+    private const val NON_ASCII_GLOB = "*[^ -~]*"
 
     /** Whether a folder or file name below [root] on the way to [path] starts with a dot. */
     fun isHiddenBelow(path: String, root: String): Boolean =
@@ -135,27 +199,42 @@ object SearchTerms {
 
     /**
      * Best matches first: the exact name, then names starting with the query, then names with a
-     * word starting with it, then the rest; within each, the most recently changed first.
+     * word starting with it, then the rest (all ignoring accents and separators). Within each, a
+     * name containing the query as typed comes first, then the most recently changed.
      */
     fun rank(files: List<FileItem>, query: String): List<FileItem> {
         val terms = parse(query)
-        val first = terms.firstOrNull() ?: return files
-        val whole = terms.joinToString(" ")
+        val first = terms.firstOrNull()?.let(::fold) ?: return files
+        val whole = fold(terms.joinToString(""))
+        val typed = query.trim()
         fun score(name: String): Int {
-            val stem = name.substringBeforeLast('.', name)
+            val folded = fold(name)
             return when {
-                name.equals(whole, ignoreCase = true) || stem.equals(whole, ignoreCase = true) -> 0
-                name.startsWith(first, ignoreCase = true) -> 1
-                WORD_START.findAll(name).any { name.startsWith(first, it.range.first, ignoreCase = true) } -> 2
+                folded == whole || fold(name.substringBeforeLast('.', name)) == whole -> 0
+                folded.startsWith(first) -> 1
+                words(name).any { fold(it).startsWith(first) } -> 2
                 else -> 3
             }
         }
         // Each name is scored once; scoring inside the comparator ran the pattern for every comparison.
-        return files.map { it to score(it.name) }
-            .sortedWith(compareBy<Pair<FileItem, Int>> { it.second }.thenByDescending { it.first.lastModified }.thenBy { it.first.path })
+        return files.map { Triple(it, score(it.name), !it.name.contains(typed, ignoreCase = true)) }
+            .sortedWith(
+                compareBy<Triple<FileItem, Int, Boolean>> { it.second }.thenBy { it.third }
+                    .thenByDescending { it.first.lastModified }.thenBy { it.first.path },
+            )
             .map { it.first }
     }
 
-    /** Where a word starts inside a name: after a separator, or at a lower-to-upper case change. */
-    private val WORD_START = Regex("(?<=[\\s._\\-()\\[\\]])\\S|(?<=\\p{Ll})\\p{Lu}")
+    /** The words of a name: split at separators and brackets, and where lower case turns upper. */
+    private fun words(name: String): List<String> = name.split(WORD_BREAK).filter { it.isNotEmpty() }
+
+    private fun Char.isSeparator() = this == ' ' || this == '.' || this == '_' || this == '-' || isWhitespace()
+
+    private val WORD_BREAK = Regex("[\\s._\\-()\\[\\]]+|(?<=\\p{Ll})(?=\\p{Lu})")
+
+    /** ASCII letters without accented forms in Latin scripts; every other letter may carry one. */
+    private val PLAIN_LETTERS = setOf('b', 'f', 'h', 'j', 'm', 'p', 'q', 'v', 'w', 'x')
+
+    private val SPELLED_OUT = mapOf('ß' to "ss", 'æ' to "ae", 'œ' to "oe", 'ø' to "o", 'ł' to "l", 'đ' to "d", 'þ' to "th")
+    private val SPELLED_PAIRS = setOf("ss", "ae", "oe")
 }

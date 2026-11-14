@@ -12,20 +12,42 @@ import org.junit.Test
 class HybridSearchTest {
 
     @Test
-    fun everyWordMustMatchAnywhereIgnoringCaseIncludingUmlauts() {
+    fun everyWordMustMatchAnywhereIgnoringCaseAccentsAndSeparators() {
         val terms = SearchTerms.parse("  ÜBUNG  2024 ")
         assertEquals(listOf("ÜBUNG", "2024"), terms)
         assertTrue(SearchTerms.matches("Mathe-übung_2024.pdf", terms))
         assertFalse(SearchTerms.matches("Mathe-übung.pdf", terms))
-        assertFalse(SearchTerms.isAscii("übung"))
-        assertTrue(SearchTerms.isAscii("IMG_2024"))
+        assertTrue(SearchTerms.matches("IMG_20240317.jpg", SearchTerms.parse("img2024")))
+        assertTrue(SearchTerms.matches("Café de Flore.jpg", SearchTerms.parse("cafe deflore")))
+        assertTrue(SearchTerms.matches("Straße.txt", SearchTerms.parse("strasse")))
+        assertTrue(SearchTerms.matches("Strasse.txt", SearchTerms.parse("straße")))
+        // ue for ü is not folded: Ü is a u with an accent, not "ue".
+        assertFalse(SearchTerms.matches("Übung.pdf", SearchTerms.parse("uebung")))
+        // Only separators is nothing to search for.
+        assertTrue(SearchTerms.parse(" - _ ").isEmpty())
     }
 
     @Test
-    fun likePatternsEscapeLikesOwnCharacters() {
-        assertEquals("%IMG\\_2024%", SearchTerms.likePattern("IMG_2024"))
-        assertEquals("%100\\%%", SearchTerms.likePattern("100%"))
-        assertEquals("%a\\\\b%", SearchTerms.likePattern("a\\b"))
+    fun foldingDropsAccentsCaseAndSeparatorsAndSpellsOutTheRest() {
+        assertEquals("matheubung2024pdf", SearchTerms.fold("Mathe-Übung_2024.PDF"))
+        assertEquals("cafe", SearchTerms.fold("Café"))
+        assertEquals("strasse", SearchTerms.fold("Straße"))
+        assertEquals("aero", SearchTerms.fold("Ærø"))
+        assertEquals("привет", SearchTerms.fold("Привет"))
+    }
+
+    @Test
+    fun patternsNarrowMediaStoreWithoutMissingAMatch() {
+        // ASCII names: the characters in order, separators allowed between them; LIKE folds case.
+        assertEquals("%i%m%g%2%0%2%4%", SearchTerms.plainPattern("IMG_2024"))
+        assertEquals("%1%0%0%\\%%", SearchTerms.plainPattern("100%"))
+        // Other names: letters that may carry an accent are one character; ß/æ/œ may stand for two letters.
+        assertEquals("%_%m%_%2%0%2%4%", SearchTerms.accentPattern("img2024"))
+        assertEquals("%_%_%_%_%%_%", SearchTerms.accentPattern("strasse"))
+        assertEquals("%_%_%f%_%", SearchTerms.accentPattern("café"))
+        val (selection, args) = SearchTerms.selection("name", "cafe")
+        assertEquals("(name LIKE ? ESCAPE '\\' OR (name GLOB ? AND name LIKE ? ESCAPE '\\'))", selection)
+        assertEquals(listOf("%c%a%f%e%", "*[^ -~]*", "%_%_%f%_%"), args.toList())
     }
 
     @Test
@@ -93,5 +115,14 @@ class HybridSearchTest {
         assertEquals("Internal storage", searchLocationLabel("/storage/emulated/0/a.jpg", volumes, "Internal storage"))
         assertEquals("SD card › Music", searchLocationLabel("/storage/1234-ABCD/Music/b.mp3", volumes, "Internal storage"))
         assertEquals("/data/other", searchLocationLabel("/data/other/c.txt", volumes, "Internal storage"))
+    }
+
+    @Test
+    fun aNameAsTypedRanksAboveOneThatOnlyMatchesWithoutAccents() {
+        fun item(name: String, time: Long) = FileItem(name, "/s/$name", false, lastModified = Date(time))
+        assertEquals(
+            listOf("café.jpg", "cafe.jpg"),
+            SearchTerms.rank(listOf(item("cafe.jpg", 9), item("café.jpg", 1)), "café").map { it.name },
+        )
     }
 }
