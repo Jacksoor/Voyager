@@ -21,6 +21,8 @@ class ShizukuFileProvider(private val connection: ShizukuConnection) : RootFileP
     RootShell(startProcess = connection::start, requireRoot = false, accessName = "Shizuku", externalInputPipe = true, temporaryDirectory = "/data/local/tmp"),
     FileSource.SHIZUKU,
 ) {
+    override val hasOpenConnection: Boolean get() = connection.isOpen
+
     override fun listing(directory: String): ByteArray = metadata(connection.files { it.list(directory) })
     override fun canonicalAt(path: String): String = metadata(connection.files { it.canonical(path) }).toString(Charsets.UTF_8)
 

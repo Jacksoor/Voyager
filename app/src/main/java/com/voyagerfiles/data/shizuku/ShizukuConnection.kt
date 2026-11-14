@@ -24,6 +24,13 @@ class ShizukuConnection private constructor(
     private val closed = AtomicBoolean(false)
     val uid: Int get() = service.uid()
 
+    /** The bound service is alive and Shizuku still runs with Voyager's permission. */
+    val isOpen: Boolean
+        get() = !closed.get() && runCatching {
+            service.asBinder().isBinderAlive && Shizuku.pingBinder() &&
+                Shizuku.checkSelfPermission() == PackageManager.PERMISSION_GRANTED
+        }.getOrDefault(false)
+
     internal fun start(script: String): Process {
         if (closed.get()) throw IOException("Shizuku session is closed. Open a new session.")
         try {

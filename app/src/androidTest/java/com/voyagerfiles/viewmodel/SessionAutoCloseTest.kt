@@ -1,5 +1,6 @@
 package com.voyagerfiles.viewmodel
 
+import com.voyagerfiles.ui.screens.ClearPinnedSessionsRule
 import android.app.Application
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.test.core.app.ApplicationProvider
@@ -18,6 +19,7 @@ import org.junit.Test
 
 class SessionAutoCloseTest {
 
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -54,7 +56,7 @@ class SessionAutoCloseTest {
         val viewModel = FileBrowserViewModel(application)
         composeTestRule.setContent {}
         composeTestRule.runOnIdle {
-            viewModel.openLocalRoot(root.absolutePath)
+            viewModel.openLocalFolder(root.absolutePath)
         }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.sessions.value.size == 1 &&
@@ -95,7 +97,7 @@ class SessionAutoCloseTest {
         val viewModel = FileBrowserViewModel(application)
         composeTestRule.setContent {}
         composeTestRule.runOnIdle {
-            viewModel.openLocalRoot(root.absolutePath)
+            viewModel.openLocalFolder(root.absolutePath)
             viewModel.setAutoCloseSessions(true)
         }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {

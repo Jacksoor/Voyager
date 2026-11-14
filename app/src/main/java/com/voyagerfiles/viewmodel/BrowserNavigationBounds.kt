@@ -34,6 +34,12 @@ internal object BrowserNavigationBounds {
             normalizedPath.startsWith("$normalizedRoot/")
     }
 
+    /** The deepest of [roots] that holds [path], or null when none does. "/" never counts as a root here. */
+    fun containingRoot(path: String, roots: List<String>): String? =
+        roots.map(::normalizePath)
+            .filter { it != "/" && isPathAtOrInsideRoot(path, it) }
+            .maxByOrNull { it.length }
+
     /** Whether [candidate] is [path] itself or lies above it, following [parentOf] up from [path]. */
     fun isSameOrAncestor(candidate: String, path: String, parentOf: (String) -> String?): Boolean {
         val target = normalizePath(candidate)

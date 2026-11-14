@@ -103,7 +103,7 @@ class BrowserDragSelectionTest {
         repeat(count) { index -> root.resolve("${index.toString().padStart(2, '0')}-${if (index % 2 == 0) "keep" else "other"}.txt").writeText("fixture") }
         vm = FileBrowserViewModel(app)
         compose.setContent { MaterialTheme { BrowserScreen(vm, onNavigateBack = {}, isTelevision = false) } }
-        compose.runOnIdle { vm.setViewMode(mode); vm.openLocalRoot(root.path) }
+        compose.runOnIdle { vm.setViewMode(mode); vm.openLocalFolder(root.path) }
         compose.waitUntil(10_000) { vm.browseState.value.files.size == count && !vm.browseState.value.isLoading }
         compose.waitForIdle()
     }

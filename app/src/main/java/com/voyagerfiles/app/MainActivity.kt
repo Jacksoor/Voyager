@@ -44,6 +44,8 @@ class MainActivity : ComponentActivity() {
     private var folderShortcutPath by mutableStateOf<String?>(null)
     private var folderShortcutGeneration by mutableLongStateOf(0L)
     private var sharedFiles by mutableStateOf<List<Uri>>(emptyList())
+    /** Read by the splash screen's keep condition, outside composition: a plain volatile flag. */
+    @Volatile private var launchSettled = false
 
     private val requestNotificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
@@ -64,7 +66,17 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        // The splash stays until the start screen is ready (the start tab, without Home first),
+        // then fades out; at most LAUNCH_SPLASH_MAX_MS.
+        val splash = installSplashScreen()
+        val splashUntil = SystemClock.uptimeMillis() + LAUNCH_SPLASH_MAX_MS
+        if (savedInstanceState != null) launchSettled = true
+        splash.setKeepOnScreenCondition { !launchSettled && SystemClock.uptimeMillis() < splashUntil }
+        splash.setOnExitAnimationListener { provider ->
+            provider.view.animate().alpha(0f).setDuration(SPLASH_FADE_MS)
+                .withEndAction { provider.remove() }
+                .start()
+        }
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
@@ -99,10 +111,13 @@ class MainActivity : ComponentActivity() {
 
             VoyagerTheme(appTheme = theme) {
                 when (storageAccessMode(permissionGranted, limitedAccessAccepted)) {
-                    StorageAccessMode.NEEDS_DECISION -> PermissionScreen(
-                        onRequestPermission = ::requestStoragePermission,
-                        onContinueLimited = { viewModel.setLimitedAccessAccepted(true) },
-                    )
+                    StorageAccessMode.NEEDS_DECISION -> {
+                        launchSettled = true
+                        PermissionScreen(
+                            onRequestPermission = ::requestStoragePermission,
+                            onContinueLimited = { viewModel.setLimitedAccessAccepted(true) },
+                        )
+                    }
                     StorageAccessMode.FULL, StorageAccessMode.LIMITED -> AppNavigation(
                         viewModel = viewModel,
                         hasAllFilesAccess = permissionGranted,
@@ -112,6 +127,7 @@ class MainActivity : ComponentActivity() {
                         onFolderRequestConsumed = { folderShortcutPath = null },
                         sharedFiles = sharedFiles,
                         onShareConsumed = { sharedFiles = emptyList() },
+                        onLaunchSettled = { launchSettled = true },
                     )
                 }
                 if (folderShortcutPath != null && !permissionGranted) {
@@ -196,3 +212,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 }
+
+/** The longest the splash waits for the start screen. */
+private const val LAUNCH_SPLASH_MAX_MS = 1_500L
+private const val SPLASH_FADE_MS = 200L

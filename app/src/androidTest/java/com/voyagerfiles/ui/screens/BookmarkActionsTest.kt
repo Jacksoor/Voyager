@@ -54,7 +54,7 @@ class BookmarkActionsTest {
         compose.runOnIdle {
             viewModel = FileBrowserViewModel(application)
             store.put("browser", viewModel)
-            viewModel.openLocalRoot(root.path)
+            viewModel.openLocalFolder(root.path)
         }
     }
 

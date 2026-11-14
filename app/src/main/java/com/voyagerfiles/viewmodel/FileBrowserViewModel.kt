@@ -51,6 +51,7 @@ import com.voyagerfiles.playback.PlaybackEntry
 import com.voyagerfiles.playback.PreparedWebDavPlayback
 import com.voyagerfiles.playback.WebDavPlaybackProvider
 import com.voyagerfiles.ui.theme.AppTheme
+import com.voyagerfiles.ui.screens.SessionBarModel
 import com.voyagerfiles.ui.text.UiText
 import com.voyagerfiles.ui.text.resolve
 import com.voyagerfiles.util.FileNameValidationResult
@@ -157,6 +158,10 @@ class FileBrowserViewModel @JvmOverloads constructor(
     private val _snackbarMessage = MutableStateFlow<UiText?>(null)
     val snackbarMessage: StateFlow<UiText?> = _snackbarMessage.asStateFlow()
 
+    /** The button offered with [snackbarMessage], if any. Read it when the message is shown. */
+    private val _snackbarAction = MutableStateFlow<SnackbarAction?>(null)
+    val snackbarAction: StateFlow<SnackbarAction?> = _snackbarAction.asStateFlow()
+
     val operationState: StateFlow<OperationState> = operationController.state
     val lastOperationResult = operationController.lastResult
     val transferConflict = operationController.conflicts.pending
@@ -254,6 +259,15 @@ class FileBrowserViewModel @JvmOverloads constructor(
         viewModelScope.launch {
             val normalizedPath = BrowserNavigationBounds.normalizePath(path)
             val rootPath = browserSessionRootPath
+            val active = _activeSession.value
+            if (
+                active != null && active.pinned && active.source != FileSource.SAF &&
+                !BrowserNavigationBounds.isPathAtOrInsideRoot(normalizedPath, active.limitPath)
+            ) {
+                // A pin keeps meaning its folder: anything above it opens in another tab.
+                openFolderElsewhere(normalizedPath)
+                return@launch
+            }
             if (
                 rootPath != null &&
                 _browseState.value.source != FileSource.SAF &&
@@ -266,32 +280,111 @@ class FileBrowserViewModel @JvmOverloads constructor(
         }
     }
 
-    fun openLocalRoot(path: String) {
+    /**
+     * Shows [path] of the active session's place in another tab, leaving the active (pinned) tab
+     * where it is: a tab already showing it, or a new unpinned one.
+     */
+    fun openFolderElsewhere(path: String) {
+        val active = _activeSession.value ?: return
+        val normalizedPath = BrowserNavigationBounds.normalizePath(path)
+        when {
+            active.source == FileSource.LOCAL -> openLocalFolder(normalizedPath)
+            active.connectionId != null -> openRemoteFolder(active.connectionId, normalizedPath)
+        }
+    }
+
+    /** Shows [path] on a server: a tab of that server already showing it, or a new unpinned one. */
+    fun openRemoteFolder(connectionId: Long, path: String) {
+        cancelInitialNavigation()
+        viewModelScope.launch {
+            val normalizedPath = BrowserNavigationBounds.normalizePath(path)
+            val existing = _sessions.value.firstOrNull {
+                it.connectionId == connectionId && BrowserNavigationBounds.normalizePath(it.currentPath) == normalizedPath
+            }
+            if (existing != null) {
+                activateSessionInternal(existing.id)
+                return@launch
+            }
+            val connection = sessionConnections.values.firstOrNull { it.id == connectionId }
+                ?: connectionRepository.connections.first().firstOrNull { it.id == connectionId }
+                ?: return@launch
+            activateSessionInternal(addRemoteSession(connection, normalizedPath))
+        }
+    }
+
+    /**
+     * Shows a local folder: switches to a session already showing exactly [path], or opens a new
+     * one there. The new session can go up to the storage volume holding [path]; a folder on no
+     * known volume (an app's private folder) stays the session's limit.
+     */
+    fun openLocalFolder(path: String) {
         cancelInitialNavigation()
         viewModelScope.launch {
             val normalizedPath = BrowserNavigationBounds.normalizePath(path)
             bookmarkDao.markUsed(normalizedPath, FileSource.LOCAL, System.currentTimeMillis())
-            val sessionId = localSessionId(normalizedPath)
-            if (_sessions.value.none { it.id == sessionId }) {
-                sessionProviders[sessionId] = FileProviderFactory.createLocal()
-                _sessions.update { sessions ->
-                    sessions + BrowserSession(
-                        id = sessionId,
-                        title = titleForLocalPath(normalizedPath),
-                        source = FileSource.LOCAL,
-                        rootPath = normalizedPath,
-                        currentPath = normalizedPath,
-                    )
-                }
-            } else {
-                _sessions.update { sessions ->
-                    sessions.map { session ->
-                        if (session.id == sessionId) session.copy(currentPath = normalizedPath) else session
-                    }
-                }
+            val existing = _sessions.value.firstOrNull { session ->
+                session.source == FileSource.LOCAL &&
+                    BrowserNavigationBounds.normalizePath(session.currentPath) == normalizedPath
             }
-            activateSessionInternal(sessionId)
+            if (existing != null) {
+                activateSessionInternal(existing.id)
+                return@launch
+            }
+            activateSessionInternal(addLocalSession(normalizedPath, normalizedPath))
         }
+    }
+
+    /** Adds a local session without showing it. Its limit is the storage volume holding [startPath]. */
+    private suspend fun addLocalSession(startPath: String, currentPath: String, pinned: Boolean = false): String {
+        val volumes = withContext(Dispatchers.IO) {
+            FileUtils.getStorageVolumes(getApplication()).filter { it.path != null }
+        }
+        val volumeRoot = BrowserNavigationBounds.containingRoot(startPath, volumes.mapNotNull { it.path })
+        val volume = volumes.firstOrNull { volumeRoot != null && BrowserNavigationBounds.normalizePath(it.path!!) == volumeRoot }
+        val rootPath = volumeRoot ?: startPath
+        val sessionId = newSessionId("local")
+        sessionProviders[sessionId] = FileProviderFactory.createLocal()
+        _sessions.update { sessions ->
+            sessions + BrowserSession(
+                id = sessionId,
+                originLabel = when {
+                    volume == null -> titleForLocalPath(startPath)
+                    // Shorter than the system's "Internal shared storage"; SD cards keep their own names.
+                    volume.isPrimary -> getApplication<Application>().getString(R.string.session_primary_storage)
+                    else -> volume.description
+                },
+                source = FileSource.LOCAL,
+                rootPath = rootPath,
+                startPath = startPath,
+                currentPath = currentPath.takeIf { BrowserNavigationBounds.isPathAtOrInsideRoot(it, rootPath) } ?: startPath,
+                removable = volume?.isRemovable == true,
+                pinned = pinned,
+                pinOrder = if (pinned) ++pinCounter else 0L,
+            )
+        }
+        return sessionId
+    }
+
+    /** Adds a SAF session at the tree's root without showing it, unless one is already open. */
+    private fun addSafSession(treeUri: Uri, pinned: Boolean = false): String {
+        val rootPath = SafFileProvider.rootDocumentUri(treeUri).toString()
+        val sessionId = safSessionId(rootPath)
+        if (_sessions.value.none { it.id == sessionId }) {
+            sessionProviders[sessionId] = FileProviderFactory.createSaf(getApplication(), treeUri)
+            _sessions.update { sessions ->
+                sessions + BrowserSession(
+                    id = sessionId,
+                    originLabel = SafFileProvider.titleForTreeUri(treeUri),
+                    source = FileSource.SAF,
+                    rootPath = rootPath,
+                    currentPath = rootPath,
+                    treeUri = treeUri.toString(),
+                    pinned = pinned,
+                    pinOrder = if (pinned) ++pinCounter else 0L,
+                )
+            }
+        }
+        return sessionId
     }
 
     fun openSafRoot(treeUri: Uri) {
@@ -300,16 +393,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
             val rootPath = SafFileProvider.rootDocumentUri(treeUri).toString()
             val sessionId = safSessionId(rootPath)
             if (_sessions.value.none { it.id == sessionId }) {
-                sessionProviders[sessionId] = FileProviderFactory.createSaf(getApplication(), treeUri)
-                _sessions.update { sessions ->
-                    sessions + BrowserSession(
-                        id = sessionId,
-                        title = SafFileProvider.titleForTreeUri(treeUri),
-                        source = FileSource.SAF,
-                        rootPath = rootPath,
-                        currentPath = rootPath,
-                    )
-                }
+                addSafSession(treeUri)
             } else {
                 _sessions.update { sessions ->
                     sessions.map { session ->
@@ -331,7 +415,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
                 _sessions.update { sessions ->
                     sessions + BrowserSession(
                         id = sessionId,
-                        title = getApplication<Application>().getString(R.string.root_title),
+                        originLabel = getApplication<Application>().getString(R.string.root_title),
                         source = FileSource.ROOT,
                         rootPath = "/",
                         currentPath = "/",
@@ -348,11 +432,12 @@ class FileBrowserViewModel @JvmOverloads constructor(
             val sessionId = "shizuku:/"
             val previous = sessionProviders.put(sessionId, provider)
             if (previous !== provider) previous?.disconnect()
+            refreshConnectionState(sessionId)
             if (_sessions.value.none { it.id == sessionId }) {
                 _sessions.update { sessions ->
                     sessions + BrowserSession(
                         id = sessionId,
-                        title = getApplication<Application>().getString(R.string.shizuku_title),
+                        originLabel = getApplication<Application>().getString(R.string.shizuku_title),
                         source = FileSource.SHIZUKU,
                         rootPath = "/",
                         currentPath = "/storage/emulated/0/Android",
@@ -418,14 +503,31 @@ class FileBrowserViewModel @JvmOverloads constructor(
         }
     }
 
+    /**
+     * Goes up one folder, within the tab's limit (see [upTarget]). False at the limit, where Back
+     * leaves the browser.
+     */
     fun navigateUp(): Boolean {
+        val parent = upTarget() ?: return false
+        navigateTo(parent)
+        return true
+    }
+
+    /**
+     * Where [navigateUp] would go, or null at the tab's limit (Back then leaves the browser). A
+     * pinned tab stops at its pinned folder; any other tab walks up to its volume or server root,
+     * the way the path bar reads, even when it was opened deeper down.
+     */
+    fun upTarget(): String? {
         val currentPath = BrowserNavigationBounds.normalizePath(_browseState.value.currentPath)
         val parent = fileProvider.getParentPath(currentPath)
-        if (BrowserNavigationBounds.canNavigateToParent(currentPath, parent, browserSessionRootPath)) {
-            navigateTo(checkNotNull(parent))
-            return true
+        val startPath = _activeSession.value?.takeIf { it.pinned }?.startPath
+        val bound = if (startPath != null && BrowserNavigationBounds.isPathAtOrInsideRoot(currentPath, startPath)) {
+            startPath
+        } else {
+            browserSessionRootPath
         }
-        return false
+        return parent?.takeIf { BrowserNavigationBounds.canNavigateToParent(currentPath, it, bound) }
     }
 
     fun onDirectoryScrolled(sessionId: String?, path: String, position: ScrollPosition) {
@@ -439,6 +541,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
         val sessionId = _activeSession.value?.id
         if (sessionId != null) {
             updateSession(sessionId) { it.copy(currentPath = normalizedPath) }
+            if (_activeSession.value?.pinned == true) savePins()
         }
         val previousPath = _browseState.value.currentPath
         scrollMemory.leave(sessionId, previousPath)
@@ -477,7 +580,9 @@ class FileBrowserViewModel @JvmOverloads constructor(
     ) {
         val requestId = loadGuard.nextRequest(sessionId)
         _browseState.update { it.copy(isLoading = true, error = null) }
-        provider.listFiles(path).fold(
+        val listing = provider.listFiles(path)
+        if (sessionId != null) refreshConnectionState(sessionId)
+        listing.fold(
             onSuccess = { files ->
                 if (!loadGuard.isCurrent(requestId, sessionId) || !isCurrentLoad(sessionId)) return@fold
                 val filtered = if (_browseState.value.showHidden) files
@@ -981,10 +1086,12 @@ class FileBrowserViewModel @JvmOverloads constructor(
 
     fun onAppBackgrounded(nowMillis: Long) {
         sessionAutoCloseTracker.onBackgrounded(nowMillis)
-        backgroundedSessionIds = _sessions.value.mapTo(mutableSetOf()) { it.id }
+        // Pinned sessions stay open; keeping them is what pinning is for.
+        backgroundedSessionIds = _sessions.value.filterNot { it.pinned }.mapTo(mutableSetOf()) { it.id }
     }
 
     fun onAppForegrounded(nowMillis: Long) {
+        refreshConnectionStates()
         val sessionIds = backgroundedSessionIds
         backgroundedSessionIds = emptySet()
         val decision = sessionAutoCloseTracker.onForegrounded(
@@ -1242,6 +1349,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
                             count,
                             listOf(count, UiText.Resource(R.string.downloads_folder)),
                         ),
+                        action = SnackbarAction.OpenFolder(downloads.absolutePath),
                     )
                 },
                 onFailure = { error ->
@@ -1256,33 +1364,231 @@ class FileBrowserViewModel @JvmOverloads constructor(
     fun connectToRemote(connection: RemoteConnection) {
         cancelInitialNavigation()
         viewModelScope.launch {
-            val sessionId = remoteSessionId(connection.id)
-            if (_sessions.value.none { it.id == sessionId }) {
-                val normalizedPath = BrowserNavigationBounds.normalizePath(connection.remotePath)
-                val source = sourceForProtocol(connection.protocol)
-                sessionProviders[sessionId] = remoteProviderFactory.create(getApplication(), connection)
-                remoteImageThumbnailSessions[sessionId] = RemoteImageThumbnailSession {
-                    remoteProviderFactory.create(getApplication(), connection)
-                }
-                _sessions.update { sessions ->
-                    sessions + BrowserSession(
-                        id = sessionId,
-                        title = connection.name,
-                        source = source,
-                        rootPath = normalizedPath,
-                        currentPath = normalizedPath,
-                        connectionId = connection.id,
-                        host = connection.host,
-                    )
-                }
-            }
+            // Reuse an unpinned tab of this server; pinned tabs keep their place and are never re-pointed.
+            val sessionId = _sessions.value.firstOrNull { it.connectionId == connection.id && !it.pinned }?.id
+                ?: addRemoteSession(connection)
             connectionRepository.updateLastConnected(connection.id, System.currentTimeMillis())
             activateSessionInternal(sessionId)
         }
     }
 
+    /**
+     * Adds a session for [connection] without showing it, starting at [startPath] (the connection's
+     * remote folder by default); nothing connects until it is shown. Returns its id.
+     */
+    private fun addRemoteSession(
+        connection: RemoteConnection,
+        startPath: String = connection.remotePath,
+        currentPath: String? = null,
+        pinned: Boolean = false,
+    ): String {
+        val sessionId = newSessionId("remote:${connection.id}")
+        val startPath = BrowserNavigationBounds.normalizePath(startPath)
+        sessionProviders[sessionId] = remoteProviderFactory.create(getApplication(), connection)
+        sessionConnections[sessionId] = connection
+        remoteImageThumbnailSessions[sessionId] = RemoteImageThumbnailSession {
+            remoteProviderFactory.create(getApplication(), connection)
+        }
+        _sessions.update { sessions ->
+            sessions + BrowserSession(
+                id = sessionId,
+                originLabel = connection.name,
+                source = sourceForProtocol(connection.protocol),
+                rootPath = "/",
+                startPath = startPath,
+                currentPath = currentPath?.let(BrowserNavigationBounds::normalizePath) ?: startPath,
+                connectionId = connection.id,
+                host = connection.host,
+                pinned = pinned,
+                pinOrder = if (pinned) ++pinCounter else 0L,
+            )
+        }
+        return sessionId
+    }
+
+    // Pinned sessions
+
+    private val _pinsRestored = MutableStateFlow(false)
+    /** True once the sessions pinned in the last run are back in [sessions]. */
+    val pinsRestored: StateFlow<Boolean> = _pinsRestored.asStateFlow()
+
+    fun setSessionPinned(sessionId: String, pinned: Boolean) {
+        val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return
+        if (pinned && !session.canPin) return
+        if (pinned && !session.pinned &&
+            !SessionBarModel.canPinMore(_sessions.value, pinCapacity)
+        ) return
+        if (pinned == session.pinned) return
+        updateSession(sessionId) { current ->
+            current.copy(
+                pinned = pinned,
+                pinOrder = if (pinned) ++pinCounter else 0L,
+                startPath = if (pinned && current.source != FileSource.SAF) current.currentPath else current.startPath,
+                // Only a pin can be the start tab.
+                isStartTab = pinned && current.isStartTab,
+            )
+        }
+        savePins()
+    }
+
+    /**
+     * Marks a pinned tab as the one the app opens on launch, or clears the mark. There is at most
+     * one start tab: marking one unmarks the previous one.
+     */
+    fun setStartTab(sessionId: String, start: Boolean) {
+        val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return
+        if (start && !session.pinned) return
+        _sessions.update { sessions ->
+            sessions.map { it.copy(isStartTab = if (it.id == sessionId) start else it.isStartTab && !start) }
+        }
+        refreshActiveSessionSnapshot()
+        missingStartTab = null
+        savePins()
+    }
+
+    /** How many tabs the current layout can pin: the bar's four, or what fits in the rail. */
+    private var pinCapacity = SessionBarModel.SIDE_CELLS
+
+    fun setPinCapacity(cells: Int) {
+        pinCapacity = cells.coerceAtLeast(1)
+    }
+
+    /** Hands out [BrowserSession.pinOrder]; restored pins take theirs first, in their saved order. */
+    private var pinCounter = 0L
+
+    private fun pinFor(session: BrowserSession): PinnedSession? {
+        if (!session.pinned) return null
+        val connectionId = session.connectionId
+        val start = session.isStartTab
+        return when {
+            session.source == FileSource.LOCAL -> PinnedSession.Local(session.startPath, session.currentPath, start)
+            session.source == FileSource.SAF ->
+                session.treeUri?.let { PinnedSession.Saf(it, session.startPath, session.currentPath, start) }
+            connectionId != null -> PinnedSession.Remote(connectionId, session.startPath, session.currentPath, start)
+            else -> null
+        }
+    }
+
+    private var savedPins: String? = null
+
+    /** Stores the pinned sessions and the folder each one shows, so they come back after a restart. */
+    private fun savePins() {
+        if (!_pinsRestored.value) return
+        val encoded = PinnedSessionCodec.encode(_sessions.value.sortedBy { it.pinOrder }.mapNotNull(::pinFor))
+        if (encoded == savedPins) return
+        savedPins = encoded
+        viewModelScope.launch { prefs.setPinnedSessions(encoded) }
+    }
+
+    /**
+     * The name of a start tab that could not come back after a restart (its folder-picker access
+     * was withdrawn or its connection deleted), so launching can say so instead of failing silently.
+     */
+    private var missingStartTab: String? = null
+
+    /** Brings back the sessions pinned in the last run, in their order, without showing or connecting any. */
+    private suspend fun restorePinnedSessions() {
+        try {
+            val stored = prefs.pinnedSessions.first()
+            savedPins = stored.orEmpty()
+            val pins = PinnedSessionCodec.decode(stored)
+            if (pins.isEmpty()) return
+            val connections = if (pins.any { it is PinnedSession.Remote }) connectionRepository.connections.first() else emptyList()
+            val grantedTrees = getApplication<Application>().contentResolver.persistedUriPermissions
+                .filter { it.isReadPermission }
+                .mapTo(mutableSetOf()) { it.uri.toString() }
+            for (pin in pins) {
+                val restoredId = runCatching {
+                    when (pin) {
+                        is PinnedSession.Local -> addLocalSession(pin.startPath, pin.currentPath, pinned = true)
+                        is PinnedSession.Remote -> connections.firstOrNull { it.id == pin.connectionId }?.let { connection ->
+                            addRemoteSession(connection, pin.startPath, pin.currentPath, pinned = true)
+                        }
+                        is PinnedSession.Saf -> if (pin.treeUri in grantedTrees) {
+                            addSafSession(Uri.parse(pin.treeUri), pinned = true)
+                        } else {
+                            null
+                        }
+                    }
+                }.getOrNull()
+                if (!pin.isStart) continue
+                if (restoredId != null) {
+                    updateSession(restoredId) { it.copy(isStartTab = true) }
+                } else {
+                    missingStartTab = when (pin) {
+                        is PinnedSession.Saf -> SafFileProvider.titleForTreeUri(Uri.parse(pin.treeUri))
+                        else -> pin.startPath.trimEnd('/').substringAfterLast('/').ifEmpty { pin.startPath }
+                    }
+                }
+            }
+        } finally {
+            _pinsRestored.value = true
+        }
+    }
+
+    /**
+     * What launching should do with the start tab. Device and folder-picker tabs open at once;
+     * a server tab connects first ([openServerStartTab]) while Home stays usable.
+     */
+    suspend fun startTabPlan(hasAllFilesAccess: Boolean): StartTabPlan {
+        pinsRestored.first { it }
+        missingStartTab?.let { return StartTabPlan.Unavailable(it) }
+        val tab = _sessions.value.firstOrNull { it.isStartTab } ?: return StartTabPlan.None
+        return when {
+            tab.source == FileSource.LOCAL && !hasAllFilesAccess -> StartTabPlan.NeedsAccess(tab.barLabel)
+            tab.source.isNetwork -> StartTabPlan.Server(tab.id, tab.barLabel)
+            else -> {
+                cancelInitialNavigation()
+                viewModelScope.launch { activateSessionInternal(tab.id) }
+                StartTabPlan.Opened
+            }
+        }
+    }
+
+    /**
+     * Connects the server start tab and lists its folder. Returns null on success, else why it
+     * failed. Cancelling the caller (the user tapped Cancel or left Home) stops the attempt.
+     */
+    suspend fun openServerStartTab(sessionId: String): UiText? {
+        cancelInitialNavigation()
+        if (!activateSessionInternal(sessionId)) return UiText.Resource(R.string.launch_tab_gone)
+        return _browseState.value.error
+    }
+
     fun disconnectRemote() {
-        closeActiveSession()
+        _activeSession.value?.let { disconnectSession(it.id) }
+    }
+
+    private val sessionConnections = mutableMapOf<String, RemoteConnection>()
+
+    /**
+     * Drops a server session's connection but keeps the tab and what it shows. Browsing in it
+     * again connects anew; pinned tabs use this instead of closing.
+     */
+    fun disconnectSession(sessionId: String) {
+        val provider = sessionProviders[sessionId] ?: return
+        val connection = sessionConnections[sessionId]
+        viewModelScope.launch {
+            remoteImageThumbnailSessions.remove(sessionId)?.close()
+            runCatching { provider.disconnect() }
+            if (connection != null && sessionId in sessionProviders) {
+                remoteImageThumbnailSessions[sessionId] = RemoteImageThumbnailSession {
+                    remoteProviderFactory.create(getApplication(), connection)
+                }
+            }
+            refreshConnectionState(sessionId)
+        }
+    }
+
+    private fun refreshConnectionState(sessionId: String) {
+        val connected = sessionProviders[sessionId]?.hasOpenConnection == true
+        if (_sessions.value.firstOrNull { it.id == sessionId }?.connected == connected) return
+        updateSession(sessionId) { it.copy(connected = connected) }
+    }
+
+    /** Re-reads every session's connection state, e.g. after the app was in the background. */
+    fun refreshConnectionStates() {
+        _sessions.value.forEach { refreshConnectionState(it.id) }
     }
 
     fun remoteImageThumbnailLoader(sessionId: String?): RemoteImageThumbnailLoader? =
@@ -1292,6 +1598,21 @@ class FileBrowserViewModel @JvmOverloads constructor(
         cancelInitialNavigation()
         viewModelScope.launch {
             activateSessionInternal(sessionId)
+        }
+    }
+
+    /** Shows the session again where it was opened (a pinned "Downloads" tab back at Downloads). */
+    fun resetSession(sessionId: String) {
+        cancelInitialNavigation()
+        viewModelScope.launch {
+            val session = _sessions.value.firstOrNull { it.id == sessionId } ?: return@launch
+            if (session.id == _activeSession.value?.id) {
+                navigateToPath(session.startPath)
+            } else {
+                updateSession(sessionId) { it.copy(currentPath = it.startPath) }
+                activateSessionInternal(sessionId)
+            }
+            if (session.pinned) savePins()
         }
     }
 
@@ -1423,7 +1744,8 @@ class FileBrowserViewModel @JvmOverloads constructor(
     }
 
     // Snackbar
-    private fun showSnackbar(message: UiText) {
+    private fun showSnackbar(message: UiText, action: SnackbarAction? = null) {
+        _snackbarAction.value = action
         _snackbarMessage.value = message
     }
 
@@ -1557,6 +1879,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
 
     fun clearSnackbar() {
         _snackbarMessage.value = null
+        _snackbarAction.value = null
     }
 
     // Settings
@@ -1626,13 +1949,16 @@ class FileBrowserViewModel @JvmOverloads constructor(
         val provider = sessionProviders[sessionId] ?: return false
         fileProvider = provider
         browserSessionRootPath = session.rootPath
+        sessionUseCounter += 1
+        val usedAt = sessionUseCounter
+        _sessions.update { sessions -> sessions.map { if (it.id == sessionId) it.copy(lastUsed = usedAt) else it } }
         _activeSession.value?.let { previous ->
             if (_sessions.value.any { it.id == previous.id }) {
                 scrollMemory.leave(previous.id, _browseState.value.currentPath)
             }
         }
         scrollMemory.enter(session.id, session.currentPath, returning = true)
-        _activeSession.value = session
+        _activeSession.value = session.copy(lastUsed = usedAt)
         _browseState.update {
             it.copy(
                 currentPath = session.currentPath,
@@ -1649,7 +1975,12 @@ class FileBrowserViewModel @JvmOverloads constructor(
 
     private suspend fun closeSessionInternal(sessionId: String) {
         val closedSession = _sessions.value.firstOrNull { it.id == sessionId } ?: return
+        if (closedSession.pinned) {
+            updateSession(sessionId) { it.copy(pinned = false, isStartTab = false) }
+            savePins()
+        }
         remoteImageThumbnailSessions.remove(sessionId)?.close()
+        sessionConnections.remove(sessionId)
         sessionProviders.remove(sessionId)?.let { provider ->
             if (provider in uploadingProviders) retiredUploadProviders.add(provider) else provider.disconnect()
         }
@@ -1663,7 +1994,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
             return
         }
 
-        val nextSession = remainingSessions.lastOrNull()
+        val nextSession = remainingSessions.maxByOrNull { it.lastUsed }
         if (nextSession != null) {
             activateSessionInternal(nextSession.id)
             return
@@ -1692,6 +2023,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
         if (closedSessions.isEmpty()) return
         val closedProviders = closedSessions.mapNotNull { session ->
             remoteImageThumbnailSessions.remove(session.id)?.close()
+            sessionConnections.remove(session.id)
             sessionProviders.remove(session.id)
         }.toSet()
         val remainingSessions = _sessions.value.filterNot { it.id in sessionIds }
@@ -1702,7 +2034,7 @@ class FileBrowserViewModel @JvmOverloads constructor(
         _snackbarMessage.value = null
 
         if (activeSessionWasClosed) {
-            val nextSession = remainingSessions.lastOrNull()
+            val nextSession = remainingSessions.maxByOrNull { it.lastUsed }
             if (nextSession == null) {
                 loadGuard.nextRequest(null)
                 fileProvider = FileProviderFactory.createLocal()
@@ -1767,11 +2099,12 @@ class FileBrowserViewModel @JvmOverloads constructor(
     private fun isCurrentLoad(sessionId: String?): Boolean =
         sessionId == _activeSession.value?.id
 
-    private fun localSessionId(rootPath: String): String =
-        "local:${BrowserNavigationBounds.normalizePath(rootPath)}"
+    private var sessionCounter = 0L
 
-    private fun remoteSessionId(connectionId: Long): String =
-        "remote:$connectionId"
+    /** A fresh id, so several sessions can share a storage volume. */
+    private fun newSessionId(kind: String): String = "$kind#${++sessionCounter}"
+
+    private var sessionUseCounter = 0L
 
     private fun safSessionId(rootPath: String): String =
         "saf:$rootPath"
@@ -1784,6 +2117,11 @@ class FileBrowserViewModel @JvmOverloads constructor(
         ConnectionProtocol.FTP -> FileSource.FTP
         ConnectionProtocol.SMB -> FileSource.SMB
         ConnectionProtocol.WEBDAV -> FileSource.WEBDAV
+    }
+
+    // Last in the class, so every property the restore touches is initialised first.
+    init {
+        viewModelScope.launch { restorePinnedSessions() }
     }
 }
 

@@ -89,6 +89,9 @@ interface FileProvider {
     suspend fun getFileInfo(path: String): Result<FileItem>
     fun getParentPath(path: String): String?
     suspend fun disconnect() {}
+
+    /** Whether a server connection is open right now. Local providers have none. */
+    val hasOpenConnection: Boolean get() = false
 }
 
 /** A file created by [FileProvider.openNewFile]; the caller closes [output]. */

@@ -97,7 +97,7 @@ class FileRowOperationsTest {
         val viewModel = withContext(Dispatchers.Main) {
             FileBrowserViewModel(application).also {
                 viewModelStore.put("browser", it)
-                it.openLocalRoot(root.absolutePath)
+                it.openLocalFolder(root.absolutePath)
             }
         }
         withTimeout(10_000) {

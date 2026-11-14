@@ -52,6 +52,7 @@ import org.junit.Test
 @OptIn(ExperimentalTestApi::class)
 class BrowserFileRowMenuTest {
 
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     @get:Rule
     val composeTestRule = createComposeRule()
 
@@ -285,7 +286,7 @@ class BrowserFileRowMenuTest {
         composeTestRule.onNodeWithText("Compress to ZIP").performClick()
         composeTestRule.onNodeWithText("Create").assertIsDisplayed()
 
-        composeTestRule.runOnIdle { viewModel.openLocalRoot(peer.absolutePath) }
+        composeTestRule.runOnIdle { viewModel.openLocalFolder(peer.absolutePath) }
         composeTestRule.waitUntil(timeoutMillis = 10_000) {
             viewModel.activeSession.value?.id != originalSession &&
                 viewModel.browseState.value.currentPath == peer.absolutePath &&
@@ -489,7 +490,7 @@ class BrowserFileRowMenuTest {
             }
         }
         composeTestRule.runOnIdle {
-            viewModel.openLocalRoot(root.absolutePath)
+            viewModel.openLocalFolder(root.absolutePath)
         }
         return viewModel
     }

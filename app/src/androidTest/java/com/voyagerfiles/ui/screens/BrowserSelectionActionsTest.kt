@@ -355,7 +355,7 @@ class BrowserSelectionActionsTest {
             }
         }
         composeTestRule.runOnIdle {
-            viewModel.openLocalRoot(root.absolutePath)
+            viewModel.openLocalFolder(root.absolutePath)
         }
         return viewModel
     }

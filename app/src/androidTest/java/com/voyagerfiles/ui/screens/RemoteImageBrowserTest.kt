@@ -25,6 +25,7 @@ import org.junit.Rule
 import org.junit.Test
 
 class RemoteImageBrowserTest {
+    @get:Rule val clearedPins = ClearPinnedSessionsRule()
     @get:Rule
     val compose = createComposeRule()
 

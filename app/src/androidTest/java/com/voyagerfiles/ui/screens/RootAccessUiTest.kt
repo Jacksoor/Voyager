@@ -46,7 +46,7 @@ class RootAccessUiTest {
         compose.onNode(hasText(app.getString(R.string.root_open)) and hasAnyAncestor(isDialog())).performClick()
         compose.waitUntil(10_000) { model.browseState.value.source == FileSource.ROOT && model.browseState.value.error != null }
         assertEquals(1, rootRequests)
-        compose.runOnIdle { model.openLocalRoot(app.cacheDir.path) }
+        compose.runOnIdle { model.openLocalFolder(app.cacheDir.path) }
         compose.waitUntil(10_000) { model.browseState.value.source == FileSource.LOCAL && !model.browseState.value.isLoading }
         assertNull(model.browseState.value.error)
         assertEquals(1, rootRequests)

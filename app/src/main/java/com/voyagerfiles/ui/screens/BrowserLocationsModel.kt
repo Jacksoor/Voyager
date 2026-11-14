@@ -15,14 +15,19 @@ internal enum class LocationGroup(@StringRes val labelRes: Int) {
     BOOKMARKS(R.string.home_bookmarks_title),
 }
 
-/** Locations the browser's Sessions sheet can open as a new session without returning Home. Entries whose root already has an open session are omitted, because that session is listed directly above them. Tapping a listed location therefore always creates a session. Local entries follow the same all-files-access rule as Home. Connections are ordered by last connection and bookmarks by last use, so the overview can show the few most recent entries and leave the rest to the full list. */
+/** Elevated file access offered among the saved connections. */
+enum class SystemAccess { ROOT, SHIZUKU }
+
+/** Locations the browser's Sessions sheet can open as a new session without returning Home. A folder some local session is showing right now is omitted, because that session is listed directly above it; tapping any other listed location opens a new session there. Local entries follow the same all-files-access rule as Home. Connections are ordered by last connection and bookmarks by last use, so the overview can show the few most recent entries and leave the rest to the full list. */
 data class BrowserLocationsModel(
     val connections: List<RemoteConnection>,
     val bookmarks: List<Bookmark>,
     val storageVolumes: List<StorageVolumeInfo>,
+    /** Root (a `su` binary exists) and Shizuku (running), unless a session of that kind is open. */
+    val systemAccess: List<SystemAccess> = emptyList(),
 ) {
     val isEmpty: Boolean
-        get() = connections.isEmpty() && bookmarks.isEmpty() && storageVolumes.isEmpty()
+        get() = connections.isEmpty() && bookmarks.isEmpty() && storageVolumes.isEmpty() && systemAccess.isEmpty()
 
     val recentConnections: List<RemoteConnection>
         get() = connections.take(RECENT_LIMIT)
@@ -46,11 +51,15 @@ data class BrowserLocationsModel(
             bookmarks: List<Bookmark>,
             storageVolumes: List<StorageVolumeInfo>,
             hasAllFilesAccess: Boolean,
+            rootAvailable: Boolean = false,
+            shizukuAvailable: Boolean = false,
         ): BrowserLocationsModel {
-            val openConnectionIds = sessions.mapNotNull { it.connectionId }.toSet()
+            val openSources = sessions.mapTo(mutableSetOf()) { it.source }
+            // A server with only pinned tabs stays listed: connecting opens an unpinned tab for it.
+            val openConnectionIds = sessions.filterNot { it.pinned }.mapNotNull { it.connectionId }.toSet()
             val openLocalRoots = sessions
                 .filter { it.source == FileSource.LOCAL }
-                .map { BrowserNavigationBounds.normalizePath(it.rootPath) }
+                .map { BrowserNavigationBounds.normalizePath(it.currentPath) }
                 .toSet()
             return BrowserLocationsModel(
                 connections = connections
@@ -75,6 +84,10 @@ data class BrowserLocationsModel(
                     }
                 } else {
                     emptyList()
+                },
+                systemAccess = buildList {
+                    if (rootAvailable && FileSource.ROOT !in openSources) add(SystemAccess.ROOT)
+                    if (shizukuAvailable && FileSource.SHIZUKU !in openSources) add(SystemAccess.SHIZUKU)
                 },
             )
         }

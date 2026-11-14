@@ -157,6 +157,8 @@ class SmbFileProvider internal constructor(
     private var discoveredShares: List<SmbDiscoveredShare>? = null
     private var virtualRootItemsCache: List<FileItem>? = null
 
+    override val hasOpenConnection: Boolean get() = sessionHandle?.isConnected == true
+
     private fun ensureSession(): SmbSessionHandle {
         sessionHandle?.takeIf { it.isConnected }?.let { return it }
         closeConnection()

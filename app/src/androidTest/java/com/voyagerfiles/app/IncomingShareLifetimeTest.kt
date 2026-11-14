@@ -79,7 +79,7 @@ class IncomingShareLifetimeTest {
 
     @Test fun localCopyReadsLaterSourcesAfterReceivingTaskRemovalAndReleasesServiceGrants() {
         receiveShare()
-        main { browser.openLocalRoot(root.path) }
+        main { browser.openLocalFolder(root.path) }
         waitUntil { browser.browseState.value.currentPath == root.path && !browser.browseState.value.isLoading }
         startAndRemoveTask()
         control("release")
@@ -128,7 +128,7 @@ class IncomingShareLifetimeTest {
         }
         try {
             receiveShare()
-            main { browser.openLocalRoot(root.path) }
+            main { browser.openLocalFolder(root.path) }
             waitUntil { browser.browseState.value.currentPath == root.path && !browser.browseState.value.isLoading }
             val fallbackSessionId = checkNotNull(browser.activeSession.value).id
             main { browser.connectToRemote(RemoteConnection(
@@ -157,7 +157,7 @@ class IncomingShareLifetimeTest {
 
     @Test fun cancellationWhileSenderIsStalledRemovesPartialFileAndReleasesGrants() {
         receiveShare()
-        main { browser.openLocalRoot(root.path) }
+        main { browser.openLocalFolder(root.path) }
         waitUntil { browser.browseState.value.currentPath == root.path && !browser.browseState.value.isLoading }
         startAndRemoveTask()
         main { browser.cancelOperation() }
@@ -170,7 +170,7 @@ class IncomingShareLifetimeTest {
 
     @Test fun revokedLaterSourceReportsFailureAndPreservesSuccessfulFiles() {
         receiveShare()
-        main { browser.openLocalRoot(root.path) }
+        main { browser.openLocalFolder(root.path) }
         waitUntil { browser.browseState.value.currentPath == root.path && !browser.browseState.value.isLoading }
         startAndRemoveTask()
         control("revoke")
@@ -186,7 +186,7 @@ class IncomingShareLifetimeTest {
 
     @Test fun revokedGrantBeforeSaveFailsWithoutOpeningOrCreatingFiles() {
         receiveShare()
-        main { browser.openLocalRoot(root.path) }
+        main { browser.openLocalFolder(root.path) }
         waitUntil { browser.browseState.value.currentPath == root.path && !browser.browseState.value.isLoading }
         control("revoke")
         main { browser.uploadDocuments(sources) }

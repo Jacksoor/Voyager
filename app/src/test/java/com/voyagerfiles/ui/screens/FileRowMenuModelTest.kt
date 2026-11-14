@@ -29,6 +29,7 @@ class FileRowMenuModelTest {
     fun localFolderOffersFolderShortcutsButNoShareOrOpenWith() {
         assertEquals(
             listOf(
+                FileRowAction.OPEN_IN_NEW_SESSION,
                 FileRowAction.COPY,
                 FileRowAction.CUT,
                 FileRowAction.RENAME,

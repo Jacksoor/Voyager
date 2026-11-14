@@ -50,7 +50,7 @@ class PreferenceWriteReloadTest {
     }
 
     @Test fun unrelatedPreferenceChangeDoesNotReloadTheDirectory() {
-        onMain { viewModel.openLocalRoot(root.path) }
+        onMain { viewModel.openLocalFolder(root.path) }
         awaitState { it.currentPath == root.path && !it.isLoading }
         // A file created after the load can only show up if something reloads the directory.
         File(root, "late.txt").writeText("late")

@@ -44,7 +44,7 @@ class BrowserKeyboardLayoutTest {
             ViewCompat.getRootWindowInsets(compose.activity.window.decorView)
                 ?.isVisible(WindowInsetsCompat.Type.ime()) == true
         }
-        compose.onNodeWithContentDescription(compose.activity.getString(R.string.content_desc_back)).assertIsDisplayed()
+        compose.onNodeWithContentDescription(compose.activity.getString(R.string.browser_locations_home)).assertIsDisplayed()
         compose.onNodeWithTag("browser-files").assertIsDisplayed()
         search.assertIsDisplayed()
     }

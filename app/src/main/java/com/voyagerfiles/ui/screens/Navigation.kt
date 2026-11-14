@@ -2,10 +2,15 @@ package com.voyagerfiles.ui.screens
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.Column
@@ -26,6 +31,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -36,12 +42,14 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.voyagerfiles.viewmodel.FileBrowserViewModel
+import com.voyagerfiles.viewmodel.StartTabPlan
 import com.voyagerfiles.data.index.StorageCategory
 import com.voyagerfiles.R
 import com.voyagerfiles.util.FolderShortcuts
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.net.URLEncoder
 
 sealed class Screen(val route: String) {
@@ -72,6 +80,29 @@ fun AppNavigation(
     onFolderRequestConsumed: () -> Unit = {},
     sharedFiles: List<Uri> = emptyList(),
     onShareConsumed: () -> Unit = {},
+    /** The start screen is decided and shown (the start tab, or Home): the splash can go. */
+    onLaunchSettled: () -> Unit = {},
+) {
+    // Relays Back so a cancelled gesture can't leave a screen shifted (see BackCancelRelay).
+    BackCancelRelay {
+        AppNavigationContent(
+            viewModel, hasAllFilesAccess, onRequestAllFilesAccess, requestedFolder, folderRequestGeneration,
+            onFolderRequestConsumed, sharedFiles, onShareConsumed, onLaunchSettled,
+        )
+    }
+}
+
+@Composable
+private fun AppNavigationContent(
+    viewModel: FileBrowserViewModel,
+    hasAllFilesAccess: Boolean,
+    onRequestAllFilesAccess: () -> Unit,
+    requestedFolder: String?,
+    folderRequestGeneration: Long,
+    onFolderRequestConsumed: () -> Unit,
+    sharedFiles: List<Uri>,
+    onShareConsumed: () -> Unit,
+    onLaunchSettled: () -> Unit,
 ) {
     val navController = rememberNavController()
     val context = LocalContext.current
@@ -80,6 +111,16 @@ fun AppNavigation(
     var showShizuku by remember { mutableStateOf(false) }
     var storageSearchQuery by rememberSaveable { mutableStateOf<String?>(null) }
     val sessionClosureGeneration by viewModel.sessionClosureGeneration.collectAsState()
+    var launchMessage by remember { mutableStateOf<LaunchMessage?>(null) }
+    // The jump into the start tab happens without a transition.
+    var instantNavigation by remember { mutableStateOf(false) }
+    fun showBrowserFromHome() {
+        if (navController.currentDestination?.route == Screen.Home.route) {
+            navController.navigate(Screen.Browser.createRoute(viewModel.browseState.value.currentPath)) {
+                launchSingleTop = true
+            }
+        }
+    }
 
     LaunchedEffect(sessionClosureGeneration) {
         if (
@@ -99,6 +140,7 @@ fun AppNavigation(
                 .weight(1f)
                 .background(MaterialTheme.colorScheme.background),
             enterTransition = {
+                if (instantNavigation) return@NavHost EnterTransition.None
                 val direction = if (targetState.destination.route == Screen.Home.route) {
                     AnimatedContentTransitionScope.SlideDirection.End
                 } else {
@@ -108,6 +150,7 @@ fun AppNavigation(
                     fadeIn(tween(220))
             },
             exitTransition = {
+                if (instantNavigation) return@NavHost ExitTransition.None
                 val direction = if (targetState.destination.route == Screen.Home.route) {
                     AnimatedContentTransitionScope.SlideDirection.End
                 } else {
@@ -116,24 +159,23 @@ fun AppNavigation(
                 slideOutOfContainer(direction, tween(300, easing = FastOutSlowInEasing)) { it / 8 } +
                     fadeOut(tween(180))
             },
+            // Back (and its predictive gesture, which drives these while it is held): both screens
+            // side by side, slightly scaled down, the previous one coming in whole from the start
+            // edge. No fading, and it finishes quickly once released.
             popEnterTransition = {
-                slideIntoContainer(
-                    AnimatedContentTransitionScope.SlideDirection.End,
-                    tween(300, easing = FastOutSlowInEasing),
-                ) { it / 8 } + fadeIn(tween(220))
+                slideIntoContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(BACK_POP_MS, easing = BACK_POP_EASING)) +
+                    scaleIn(tween(BACK_POP_MS, easing = BACK_POP_EASING), initialScale = BACK_POP_SCALE)
             },
             popExitTransition = {
-                slideOutOfContainer(
-                    AnimatedContentTransitionScope.SlideDirection.End,
-                    tween(300, easing = FastOutSlowInEasing),
-                ) { it / 8 } + fadeOut(tween(180))
+                slideOutOfContainer(AnimatedContentTransitionScope.SlideDirection.End, tween(BACK_POP_MS, easing = BACK_POP_EASING)) +
+                    scaleOut(tween(BACK_POP_MS, easing = BACK_POP_EASING), targetScale = BACK_POP_SCALE)
             },
         ) {
             composable(Screen.Home.route) {
                 HomeScreen(
                     viewModel = viewModel,
                     onNavigateToBrowser = { path ->
-                        viewModel.openLocalRoot(path)
+                        viewModel.openLocalFolder(path)
                         navController.navigate(Screen.Browser.createRoute(path))
                     },
                     onNavigateToSession = { sessionId, path ->
@@ -157,6 +199,8 @@ fun AppNavigation(
                     onRequestAllFilesAccess = onRequestAllFilesAccess,
                     onNavigateToCategory = { navController.navigate(Screen.Category.createRoute(it)) },
                     onNavigateToSearch = { navController.navigate(Screen.Search.route) },
+                    launchMessage = launchMessage,
+                    onLaunchMessageDone = { launchMessage = null },
                 )
             }
 
@@ -170,6 +214,10 @@ fun AppNavigation(
                         if (navController.previousBackStackEntry?.destination?.route == Screen.Search.route) navController.popBackStack()
                         else navController.navigateHome()
                     },
+                    onNavigateHome = { navController.navigateHome() },
+                    leaveViaSystemBack = true,
+                    onOpenRoot = { confirmRoot = true },
+                    onOpenShizuku = { showShizuku = true },
                     onFindDuplicates = { path -> navController.navigate(Screen.Duplicates.createRoute(path)) },
                     hasAllFilesAccess = hasAllFilesAccess,
                     onSearchSharedStorage = { query ->
@@ -216,7 +264,7 @@ fun AppNavigation(
                     onRequestAllFilesAccess = onRequestAllFilesAccess,
                     onNavigateBack = { navController.popBackStack() },
                     onOpenFolder = { path ->
-                        viewModel.openLocalRoot(path)
+                        viewModel.openLocalFolder(path)
                         navController.navigate(Screen.Browser.createRoute(path))
                     },
                     requestedQuery = storageSearchQuery,
@@ -281,7 +329,9 @@ fun AppNavigation(
             onConnected = { provider ->
                 viewModel.openShizukuSession(provider)
                 showShizuku = false
-                navController.navigate(Screen.Browser.createRoute("/storage/emulated/0/Android"))
+                if (navController.currentDestination?.route != Screen.Browser.route) {
+                    navController.navigate(Screen.Browser.createRoute("/storage/emulated/0/Android"))
+                }
             },
         )
     }
@@ -294,7 +344,9 @@ fun AppNavigation(
                 TextButton(onClick = {
                     confirmRoot = false
                     viewModel.openRootSession()
-                    navController.navigate(Screen.Browser.createRoute("/"))
+                    if (navController.currentDestination?.route != Screen.Browser.route) {
+                        navController.navigate(Screen.Browser.createRoute("/"))
+                    }
                 }) { Text(stringResource(R.string.root_open)) }
             },
             dismissButton = {
@@ -302,6 +354,42 @@ fun AppNavigation(
             },
         )
     }
+    // The start tab: opened once per launch, and not when a folder shortcut or shared files opened
+    // the app. A start tab that can be opened opens straight in the browser, without a transition;
+    // a server tab connects there, with the browser's own progress and its error and Retry.
+    var launchHandled by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        if (launchHandled) {
+            onLaunchSettled()
+            return@LaunchedEffect
+        }
+        launchHandled = true
+        try {
+            if (requestedFolder != null || sharedFiles.isNotEmpty()) return@LaunchedEffect
+            val plan = withTimeoutOrNull(LAUNCH_DECISION_TIMEOUT_MS) { viewModel.startTabPlan(hasAllFilesAccess) }
+            when (plan) {
+                null, StartTabPlan.None -> Unit
+                StartTabPlan.Opened -> {
+                    instantNavigation = true
+                    showBrowserFromHome()
+                }
+                is StartTabPlan.NeedsAccess -> launchMessage = LaunchMessage.NeedsAccess(plan.label)
+                is StartTabPlan.Unavailable -> launchMessage = LaunchMessage.Unavailable(plan.label)
+                is StartTabPlan.Server -> {
+                    viewModel.activateSession(plan.sessionId)
+                    instantNavigation = true
+                    showBrowserFromHome()
+                }
+            }
+            // Let the browser be composed and drawn before the splash goes.
+            repeat(2) { withFrameNanos { } }
+        } finally {
+            instantNavigation = false
+            // The splash stays until here (MainActivity), so Home doesn't flash before the start tab.
+            onLaunchSettled()
+        }
+    }
+
     LaunchedEffect(requestedFolder, folderRequestGeneration, hasAllFilesAccess) {
         if (requestedFolder != null && hasAllFilesAccess) {
             val folder = try {
@@ -314,7 +402,7 @@ fun AppNavigation(
                 return@LaunchedEffect
             }
             withContext(Dispatchers.Main.immediate) {
-                viewModel.openLocalRoot(folder.path)
+                viewModel.openLocalFolder(folder.path)
                 if (navController.currentDestination?.route != Screen.Browser.route) {
                     navController.navigate(Screen.Browser.createRoute(folder.path)) {
                         popUpTo(Screen.Home.route)
@@ -345,3 +433,16 @@ private fun NavHostController.navigateHome() {
         launchSingleTop = true
     }
 }
+
+/** The Back transition: quick, and the screens shrink this much while side by side. */
+private const val BACK_POP_MS = 220
+private const val BACK_POP_SCALE = 0.92f
+
+/**
+ * Material's emphasized decelerate. The held gesture seeks through the transition, so this moves
+ * most of the way early: a short swipe already brings the previous screen well in.
+ */
+private val BACK_POP_EASING = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
+
+/** How long launch waits for the start tab to be decided before showing Home anyway. */
+private const val LAUNCH_DECISION_TIMEOUT_MS = 1_500L
