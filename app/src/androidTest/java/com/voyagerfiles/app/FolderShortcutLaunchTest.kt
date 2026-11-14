@@ -2,7 +2,11 @@ package com.voyagerfiles.app
 
 import android.os.Environment
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.onNodeWithText
+import com.voyagerfiles.ui.screens.SESSION_BAR_TEST_TAG
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.filters.SdkSuppress
@@ -40,7 +44,8 @@ class FolderShortcutLaunchTest {
             compose.onNodeWithText("inside.txt").assertExists()
             scenario.onActivity { it.startActivity(FolderShortcuts.launchIntent(it, root.path)) }
             waitForPath(root.path)
-            compose.onNodeWithText("second").assertExists()
+            // The folder in the list; the bar also has a tab named "second" from the shortcut before.
+            compose.onNode(hasText("second") and !hasAnyAncestor(hasTestTag(SESSION_BAR_TEST_TAG))).assertExists()
         }
     }
 
